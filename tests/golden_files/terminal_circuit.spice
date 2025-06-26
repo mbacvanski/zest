@@ -1,0 +1,7 @@
+.title TerminalCircuit
+
+V1 gnd gnd DC 10.0
+R1 gnd n1 1000.0
+C1 n1 n2 1e-07
+
+.end

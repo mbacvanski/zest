@@ -1,0 +1,6 @@
+.title SimpleCircuit
+
+V1 in gnd DC 5.0
+R1 in out 1000.0
+
+.end

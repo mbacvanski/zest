@@ -1,0 +1,7 @@
+.title ExampleCircuit
+
+V1 vin gnd DC 9.0
+R1 vin vout 1000.0
+R2 vout gnd 2000.0
+
+.end
