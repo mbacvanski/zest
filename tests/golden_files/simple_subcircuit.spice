@@ -1,0 +1,13 @@
+* Circuit: TestMain
+
+* ===== Subcircuit Definitions ===== *
+.SUBCKT VOLTAGE_DIVIDER vin vout gnd
+R1 vin vout 10000
+R2 vout gnd 10000
+.ENDS VOLTAGE_DIVIDER
+
+* ===== Main Circuit Components ===== *
+V1 V1_pos V1_neg DC 12.0
+XU1 V1_pos XU1_vout V1_neg VOLTAGE_DIVIDER
+
+.end

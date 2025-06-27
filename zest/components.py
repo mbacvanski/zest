@@ -33,11 +33,7 @@ class Component:
         self._requested_name = name
         self.name = name or "UNNAMED"  # Temporary name until circuit assigns proper one
         
-        # Auto-register with current circuit if one exists
-        from .circuit import get_current_circuit
-        current_circuit = get_current_circuit()
-        if current_circuit:
-            current_circuit.add_component(self)
+        # Components must be explicitly added to circuits
     
     def get_component_type_prefix(self):
         """Get the SPICE prefix for this component type."""
@@ -255,4 +251,44 @@ class Inductor(Component):
         v_n2 = terminal_voltages.get('n2', 0.0)
         
         if isinstance(v_n1, (int, float)) and isinstance(v_n2, (int, float)):
-            results['voltage_across'] = v_n1 - v_n2 
+            results['voltage_across'] = v_n1 - v_n2
+
+
+class SubCircuit(Component):
+    """
+    Represents an instance of a subcircuit definition, behaving like a single component.
+    """
+    def __init__(self, definition, name=None):
+        from .circuit import Circuit
+        super().__init__(name)
+        if not isinstance(definition, Circuit):
+            raise TypeError("Subcircuit definition must be a 'Circuit' object.")
+        if not definition.pins:
+            raise ValueError(f"The subcircuit definition '{definition.name}' has no external pins defined. "
+                             "Use the `add_pin()` method on the definition circuit.")
+
+        self.definition = definition
+        self._terminals = {}
+
+        # Dynamically create terminals on this instance based on the definition's pins.
+        for pin_name in self.definition.pins.keys():
+            terminal = Terminal(self, pin_name)
+            self._terminals[pin_name] = terminal
+            setattr(self, pin_name, terminal)  # Allows access like my_op_amp.vcc
+
+    def get_component_type_prefix(self):
+        return "X"
+
+    def get_terminals(self):
+        return list(self._terminals.items())
+
+    def to_spice(self, circuit):
+        """Generates the SPICE 'X' line for this subcircuit instance."""
+        # The node names are resolved in the context of the PARENT circuit.
+        pin_order = self.definition.pins.keys()
+        node_names_in_parent = [
+            circuit.get_spice_node_name(getattr(self, pin_name))
+            for pin_name in pin_order
+        ]
+
+        return f"{self.name} {' '.join(node_names_in_parent)} {self.definition.name}" 

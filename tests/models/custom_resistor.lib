@@ -1,0 +1,4 @@
+* Custom 10k Resistor Model for Testing Includes
+.SUBCKT CUSTOM_RESISTOR n1 n2
+R1 n1 n2 10k
+.ENDS CUSTOM_RESISTOR 

@@ -28,7 +28,12 @@ class TestGraphAPI(unittest.TestCase):
         c1 = Capacitor(capacitance=1e-6)
         l1 = Inductor(inductance=1e-3)
         
-        # Components should be auto-registered
+        # Components need to be explicitly added to the circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(c1)
+        self.circuit.add_component(l1)
+        
         self.assertEqual(len(self.circuit.components), 4)
         self.assertIn(vs, self.circuit.components)
         self.assertIn(r1, self.circuit.components)
@@ -42,6 +47,10 @@ class TestGraphAPI(unittest.TestCase):
         """Test basic wire() method functionality."""
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
+        
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
         
         # Wire components
         self.circuit.wire(vs.pos, r1.n1)
@@ -61,6 +70,11 @@ class TestGraphAPI(unittest.TestCase):
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
         r2 = Resistor(resistance=2000)
+        
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(r2)
         
         # Wire multiple components to the same terminal
         self.circuit.wire(vs.pos, r1.n1)
@@ -82,6 +96,10 @@ class TestGraphAPI(unittest.TestCase):
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
         
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        
         # Add the same wire multiple times
         self.circuit.wire(vs.pos, r1.n1)
         self.circuit.wire(vs.pos, r1.n1)  # Duplicate wire - should be ignored
@@ -95,6 +113,10 @@ class TestGraphAPI(unittest.TestCase):
         """Test that wire() validates input types."""
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
+        
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
         
         # Valid connections should work
         self.circuit.wire(vs.pos, r1.n1)
@@ -116,6 +138,12 @@ class TestGraphAPI(unittest.TestCase):
         r1 = Resistor(resistance=1000)
         c1 = Capacitor(capacitance=1e-6)
         l1 = Inductor(inductance=1e-3)
+        
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(c1)
+        self.circuit.add_component(l1)
         
         # VoltageSource terminals
         self.assertTrue(hasattr(vs, 'pos'))
@@ -151,6 +179,11 @@ class TestGraphAPI(unittest.TestCase):
         r1 = Resistor(resistance=1000)
         r2 = Resistor(resistance=2000)
         
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(r2)
+        
         # Build voltage divider
         self.circuit.wire(vs.neg, self.circuit.gnd)
         self.circuit.wire(vs.pos, r1.n1)
@@ -174,6 +207,11 @@ class TestGraphAPI(unittest.TestCase):
         r1 = Resistor(resistance=1000)
         r2 = Resistor(resistance=2000)
         
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(r2)
+        
         # Connect terminals
         self.circuit.wire(vs.pos, r1.n1)  # Should create shared node
         self.circuit.wire(r1.n2, r2.n1)  # Should create shared node
@@ -196,6 +234,10 @@ class TestGraphAPI(unittest.TestCase):
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
         
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        
         # Connect to ground
         self.circuit.wire(vs.neg, self.circuit.gnd)
         self.circuit.wire(r1.n2, self.circuit.gnd)
@@ -213,6 +255,12 @@ class TestGraphAPI(unittest.TestCase):
         r1 = Resistor(resistance=1000)
         r2 = Resistor(resistance=2000)
         c1 = Capacitor(capacitance=1e-6)
+        
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(r2)
+        self.circuit.add_component(c1)
         
         # Build complex circuit
         self.circuit.wire(vs.neg, self.circuit.gnd)
@@ -240,6 +288,13 @@ class TestGraphAPI(unittest.TestCase):
         r2 = Resistor(resistance=2000)
         r3 = Resistor(resistance=3000)
         
+        # Add components to circuit
+        self.circuit.add_component(vs1)
+        self.circuit.add_component(vs2)
+        self.circuit.add_component(r1)
+        self.circuit.add_component(r2)
+        self.circuit.add_component(r3)
+        
         # Names are assigned during SPICE compilation
         spice = self.circuit.compile_to_spice()
         
@@ -256,6 +311,8 @@ class TestGraphAPI(unittest.TestCase):
         circuit1 = Circuit("Circuit 1")
         vs1 = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
+        circuit1.add_component(vs1)
+        circuit1.add_component(r1)
         circuit1.wire(vs1.pos, r1.n1)
         circuit1.wire(vs1.neg, circuit1.gnd)
         circuit1.wire(r1.n2, circuit1.gnd)
@@ -264,6 +321,8 @@ class TestGraphAPI(unittest.TestCase):
         circuit2 = Circuit("Circuit 2")
         vs2 = VoltageSource(voltage=12.0)
         r2 = Resistor(resistance=2000)
+        circuit2.add_component(vs2)
+        circuit2.add_component(r2)
         circuit2.wire(vs2.pos, r2.n1)
         circuit2.wire(vs2.neg, circuit2.gnd)
         circuit2.wire(r2.n2, circuit2.gnd)
@@ -282,6 +341,10 @@ class TestGraphAPI(unittest.TestCase):
         """Test circuit string representation."""
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
+        
+        # Add components to circuit
+        self.circuit.add_component(vs)
+        self.circuit.add_component(r1)
         
         self.circuit.wire(vs.pos, r1.n1)
         self.circuit.wire(vs.neg, self.circuit.gnd)
@@ -303,6 +366,11 @@ class TestGraphAPIWithGoldenFiles(GoldenTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=1000)
         r2 = Resistor(resistance=2000)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(r2)
+        
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
         circuit.wire(r1.n2, r2.n1)
@@ -319,6 +387,11 @@ class TestGraphAPIWithGoldenFiles(GoldenTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=1000)
         c1 = Capacitor(capacitance=1e-6)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
+        
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
         circuit.wire(r1.n2, c1.pos)
@@ -333,6 +406,10 @@ class TestGraphAPIWithGoldenFiles(GoldenTestMixin, unittest.TestCase):
         
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
         
         circuit.wire(vs.pos, r1.n1)
         circuit.wire(vs.neg, circuit.gnd)

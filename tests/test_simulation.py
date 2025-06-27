@@ -25,6 +25,11 @@ class TestCircuitSimulator(unittest.TestCase):
         self.r1 = Resistor(resistance=1000)
         self.r2 = Resistor(resistance=2000)
         
+        # Add components to circuit
+        self.circuit.add_component(self.vs)
+        self.circuit.add_component(self.r1)
+        self.circuit.add_component(self.r2)
+        
         # Wire the voltage divider
         self.circuit.wire(self.vs.neg, self.circuit.gnd)
         self.circuit.wire(self.vs.pos, self.r1.n1)
@@ -61,6 +66,10 @@ class TestCircuitIntegration(unittest.TestCase):
         self.vs = VoltageSource(voltage=5.0)
         self.r1 = Resistor(resistance=1000)
         
+        # Add components to circuit
+        self.circuit.add_component(self.vs)
+        self.circuit.add_component(self.r1)
+        
         # Wire simple circuit
         self.circuit.wire(self.vs.neg, self.circuit.gnd)
         self.circuit.wire(self.vs.pos, self.r1.n1)
@@ -96,6 +105,11 @@ class TestSpiceNetlistGeneration(GoldenTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=1000)
         r2 = Resistor(resistance=2000)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(r2)
+        
         # Wire the components
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
@@ -116,6 +130,12 @@ class TestSpiceNetlistGeneration(GoldenTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=100)
         l1 = Inductor(inductance=1e-3)
         c1 = Capacitor(capacitance=1e-6)
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(l1)
+        circuit.add_component(c1)
         
         # Wire series RLC circuit
         circuit.wire(vs.neg, circuit.gnd)
@@ -138,6 +158,11 @@ class TestSpiceNetlistGeneration(GoldenTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=1000)
         c1 = Capacitor(capacitance=1e-6)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
+        
         # Connect using different terminal names
         circuit.wire(vs.negative, circuit.gnd)  # Use alias
         circuit.wire(vs.positive, r1.a)         # Use alias
@@ -154,6 +179,9 @@ class TestSpiceNetlistGeneration(GoldenTestMixin, unittest.TestCase):
         """Test that wire() method validates inputs properly."""
         circuit = Circuit("Validation Test")
         r1 = Resistor(resistance=1000)
+        
+        # Add component to circuit
+        circuit.add_component(r1)
         
         # Valid connections should work
         circuit.wire(r1.n1, circuit.gnd)
@@ -178,7 +206,13 @@ class TestSpiceNetlistGeneration(GoldenTestMixin, unittest.TestCase):
         c1 = Capacitor(capacitance=1e-6)
         l1 = Inductor(inductance=1e-3)
         
-        # All should be auto-registered
+        # Add components to circuit explicitly
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
+        circuit.add_component(l1)
+        
+        # All should be registered
         self.assertEqual(len(circuit.components), 4)
         
         # But no wires initially

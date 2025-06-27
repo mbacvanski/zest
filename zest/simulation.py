@@ -140,13 +140,56 @@ class SimulatedCircuit:
     
     def _extract_value(self, node_value):
         """Extract numeric value from PySpice waveform or other objects."""
-        # Handle PySpice WaveForm objects (transient/AC analysis)
-        if hasattr(node_value, 'shape') and hasattr(node_value, '__getitem__'):
-            # This is a PySpice WaveForm object - convert to numpy array
+        # Handle PySpice WaveForm objects with units
+        if hasattr(node_value, 'as_ndarray'):
+            # This is a PySpice UnitValues/WaveForm object
             try:
-                return np.array([float(val) for val in node_value])
+                # Extract the raw numpy array without units
+                raw_array = node_value.as_ndarray()
+                
+                # For DC analysis, return the scalar value if it's just one point
+                if hasattr(raw_array, 'shape') and len(raw_array.shape) == 0:
+                    # It's a scalar wrapped in an array
+                    return float(raw_array.item()) if hasattr(raw_array, 'item') else float(raw_array)
+                elif len(raw_array) == 1:
+                    # Single value array - extract the scalar
+                    return float(raw_array[0])
+                else:
+                    # Multiple values - return as numpy array for transient/AC analysis
+                    return np.array(raw_array, dtype=float)
             except:
-                return np.array(node_value)
+                # Fallback for PySpice objects
+                try:
+                    # Try to convert to float directly
+                    return float(node_value)
+                except:
+                    # Last resort: return the raw value
+                    return node_value
+        
+        # Handle regular numpy arrays and array-like objects
+        elif hasattr(node_value, 'shape') and hasattr(node_value, '__getitem__'):
+            try:
+                # For DC analysis, return the scalar value if it's just one point
+                if hasattr(node_value, 'shape') and len(node_value.shape) == 0:
+                    # It's a scalar wrapped in an array
+                    return float(node_value.item()) if hasattr(node_value, 'item') else float(node_value)
+                elif len(node_value) == 1:
+                    # Single value array - extract the scalar
+                    return float(node_value[0])
+                else:
+                    # Multiple values - return as numpy array for transient/AC analysis
+                    return np.array([float(val) for val in node_value])
+            except:
+                # Fallback: try to extract single value or return array
+                try:
+                    if hasattr(node_value, 'item'):
+                        return float(node_value.item())
+                    elif len(node_value) == 1:
+                        return float(node_value[0])
+                    else:
+                        return np.array(node_value)
+                except:
+                    return np.array(node_value)
         elif hasattr(node_value, '__float__'):
             try:
                 return float(node_value)
@@ -159,7 +202,11 @@ class SimulatedCircuit:
         elif hasattr(node_value, '__iter__') and not isinstance(node_value, str):
             # For other array-like objects
             try:
-                return np.array(node_value) if hasattr(np, 'array') else list(node_value)
+                # For DC analysis, if it's a single value, extract it
+                if len(node_value) == 1:
+                    return float(node_value[0])
+                else:
+                    return np.array(node_value) if hasattr(np, 'array') else list(node_value)
             except:
                 return node_value
         else:
@@ -234,6 +281,48 @@ class CircuitSimulator:
         # Create PySpice circuit
         pyspice_circuit = PySpiceCircuit(self.circuit.name)
         
+        # Add .INCLUDE statements for external model files
+        from .components import SubCircuit
+        all_includes = set(self.circuit.includes)
+        circuits_to_scan = [self.circuit]
+        scanned_definitions = {self.circuit}
+
+        while circuits_to_scan:
+            current_circuit = circuits_to_scan.pop()
+            for component in current_circuit.components:
+                if isinstance(component, SubCircuit):
+                    definition = component.definition
+                    if definition not in scanned_definitions:
+                        all_includes.update(definition.includes)
+                        scanned_definitions.add(definition)
+                        circuits_to_scan.append(definition)
+
+        if all_includes:
+            for include_path in sorted(list(all_includes)):
+                pyspice_circuit.raw_spice += f'.INCLUDE "{include_path}"\n'
+        
+        # Add external models/subcircuits to raw SPICE (legacy support)
+        if self.circuit._include_models:
+            for model_text in sorted(self.circuit._include_models):
+                pyspice_circuit.raw_spice += f"{model_text}\n"
+        
+        # Add subcircuit definitions
+        from .components import SubCircuit
+        unique_definitions = {
+            comp.definition for comp in self.circuit.components if isinstance(comp, SubCircuit)
+        }
+        
+        # Filter out external-only subcircuits (defined in .INCLUDE files)
+        internal_definitions = {
+            definition for definition in unique_definitions
+            if not getattr(definition, '_is_external_only', False)
+        }
+        
+        if internal_definitions:
+            for definition in sorted(list(internal_definitions), key=lambda c: c.name):
+                subckt_spice = definition._compile_as_subcircuit()
+                pyspice_circuit.raw_spice += f"{subckt_spice}\n"
+        
         # Add components from our circuit
         for component in self.circuit.components:
             self._add_component_to_pyspice(pyspice_circuit, component, add_current_probes)
@@ -255,7 +344,17 @@ class CircuitSimulator:
     
     def _add_component_to_pyspice(self, pyspice_circuit, component, add_current_probes=False):
         """Add a Zest component to PySpice circuit."""
-        from .components import VoltageSource, Resistor, Capacitor, Inductor
+        from .components import VoltageSource, Resistor, Capacitor, Inductor, SubCircuit
+        
+        # For SubCircuit and other components that compile to SPICE,
+        # we handle them through the raw SPICE interface
+        if isinstance(component, SubCircuit) or hasattr(component, 'to_spice'):
+            # Check if this is a basic component we can handle directly
+            if not isinstance(component, (VoltageSource, Resistor, Capacitor, Inductor)):
+                # This is a component that needs to be handled as raw SPICE
+                spice_line = component.to_spice(self.circuit)
+                pyspice_circuit.raw_spice += f"{spice_line}\n"
+                return
         
         if isinstance(component, VoltageSource):
             # Get SPICE node names for the terminals
@@ -267,8 +366,11 @@ class CircuitSimulator:
                 pos_node = pyspice_circuit.gnd
             if neg_node == 'gnd':
                 neg_node = pyspice_circuit.gnd
-                
-            pyspice_circuit.V(component.name, pos_node, neg_node, component.voltage@u_V)
+            
+            # PySpice adds a "V" prefix to voltage source names, so we need to remove 
+            # the "V" from our component name to avoid "VV1" 
+            vs_name = component.name[1:] if component.name.startswith('V') else component.name
+            pyspice_circuit.V(vs_name, pos_node, neg_node, component.voltage@u_V)
             
         elif isinstance(component, Resistor):
             # Get SPICE node names for the terminals
@@ -280,8 +382,10 @@ class CircuitSimulator:
                 n1_node = pyspice_circuit.gnd
             if n2_node == 'gnd':
                 n2_node = pyspice_circuit.gnd
-                
-            resistor = pyspice_circuit.R(component.name, n1_node, n2_node, component.resistance@u_Ω)
+            
+            # PySpice adds an "R" prefix to resistor names
+            r_name = component.name[1:] if component.name.startswith('R') else component.name    
+            resistor = pyspice_circuit.R(r_name, n1_node, n2_node, component.resistance@u_Ω)
             
             # Add current probe if requested
             if add_current_probes:
@@ -297,8 +401,10 @@ class CircuitSimulator:
                 pos_node = pyspice_circuit.gnd
             if neg_node == 'gnd':
                 neg_node = pyspice_circuit.gnd
-                
-            pyspice_circuit.C(component.name, pos_node, neg_node, component.capacitance@u_F)
+            
+            # PySpice adds a "C" prefix to capacitor names
+            c_name = component.name[1:] if component.name.startswith('C') else component.name
+            pyspice_circuit.C(c_name, pos_node, neg_node, component.capacitance@u_F)
             
         elif isinstance(component, Inductor):
             # Get SPICE node names for the terminals
@@ -310,8 +416,10 @@ class CircuitSimulator:
                 n1_node = pyspice_circuit.gnd
             if n2_node == 'gnd':
                 n2_node = pyspice_circuit.gnd
-                
-            pyspice_circuit.L(component.name, n1_node, n2_node, component.inductance@u_H)
+            
+            # PySpice adds an "L" prefix to inductor names
+            l_name = component.name[1:] if component.name.startswith('L') else component.name
+            pyspice_circuit.L(l_name, n1_node, n2_node, component.inductance@u_H)
             
         else:
             raise ValueError(f"Unsupported component type: {type(component)}")
@@ -333,7 +441,10 @@ class CircuitSimulator:
         simulator = pyspice_circuit.simulator(temperature=temperature, nominal_temperature=temperature)
         
         try:
-            analysis = simulator.dc(source_name, start@u_V, stop@u_V, step@u_V)
+            # PySpice newer API uses keyword arguments with slice notation
+            # PySpice expects the exact component name for sweeps
+            sweep_kwargs = {source_name: slice(start, stop, step)}
+            analysis = simulator.dc(**sweep_kwargs)
             return SimulatedCircuit(self.circuit, "DC Sweep", analysis)
         except Exception as e:
             raise RuntimeError(f"DC sweep simulation failed: {e}")

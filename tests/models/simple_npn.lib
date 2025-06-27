@@ -1,0 +1,7 @@
+* Simplified NPN BJT model for testing purposes only.
+* This is not a physical model. For testing purposes only.
+.SUBCKT SIMPLE_NPN C B E
+* Use a simple BJT model with basic Gummel-Poon parameters
+Q1 C B E SIMPLE_NPN_MODEL
+.MODEL SIMPLE_NPN_MODEL NPN (IS=1E-14 BF=100 BR=1 RC=10 RE=1 RB=100 CJE=1E-12 CJC=1E-12 TF=1E-9 TR=1E-9)
+.ENDS SIMPLE_NPN 

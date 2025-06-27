@@ -1,0 +1,19 @@
+* Circuit: MixedSubcircuits
+
+* ===== Subcircuit Definitions ===== *
+.SUBCKT RC_FILTER input output gnd
+R1 input output 1000
+C1 output gnd 1e-06
+.ENDS RC_FILTER
+
+.SUBCKT VOLTAGE_DIVIDER vin vout gnd
+R1 vin vout 10000
+R2 vout gnd 10000
+.ENDS VOLTAGE_DIVIDER
+
+* ===== Main Circuit Components ===== *
+V1 V1_pos V1_neg DC 9.0
+XU1 V1_pos XU1_vout V1_neg VOLTAGE_DIVIDER
+XU2 XU1_vout XU2_output V1_neg RC_FILTER
+
+.end

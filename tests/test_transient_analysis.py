@@ -42,6 +42,11 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=1000)   # 1kΩ
         c1 = Capacitor(capacitance=1e-6) # 1µF
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
+        
         # Wire the circuit: Vs -> R -> C -> Gnd
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)      # Voltage source to resistor
@@ -158,9 +163,84 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         """Test RC circuit discharging transient."""
         print("\n=== RC Circuit Discharging Transient Analysis ===")
         
-        # Skip this test for now - discharging requires initial conditions
-        # which need special PySpice syntax (.IC directive)
-        self.skipTest("RC discharging test requires initial condition implementation in Zest")
+        # Create an RC circuit for discharging
+        circuit = Circuit("RC Discharging")
+        
+        # For discharging, we use a voltage source at 0V and set initial condition on capacitor
+        vs = VoltageSource(voltage=0.0)  # Discharge through 0V source
+        r1 = Resistor(resistance=2000)   # 2kΩ
+        c1 = Capacitor(capacitance=0.5e-6)  # 0.5µF
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
+        
+        # Wire the circuit: capacitor discharges through resistor to ground via voltage source
+        circuit.wire(vs.neg, circuit.gnd)
+        circuit.wire(vs.pos, r1.n1)
+        circuit.wire(r1.n2, c1.pos)
+        circuit.wire(c1.neg, circuit.gnd)
+        
+        # Set initial condition: capacitor starts at 5V (charged state)
+        circuit.set_initial_condition(c1.pos, 5.0)
+        
+        # Time constant τ = RC = 2000 * 0.5e-6 = 1ms
+        tau = r1.resistance * c1.capacitance
+        end_time = 5 * tau  # Simulate for 5 time constants (5ms)
+        step_time = end_time / 1000  # 1000 points
+        
+        print(f"Time constant τ = RC = {tau*1000:.1f}ms")
+        print(f"Simulation time: {end_time*1000:.1f}ms (5τ)")
+        print(f"Time step: {step_time*1e6:.1f}µs")
+        
+        # Run transient simulation
+        simulated_circuit = circuit.simulate_transient(step_time=step_time, end_time=end_time)
+        
+        # Extract capacitor voltage
+        times = simulated_circuit.get_time_vector()
+        cap_voltage = simulated_circuit.get_node_voltage(c1.pos)
+        cap_voltage_data = simulated_circuit._extract_value(cap_voltage)
+        
+        if times is None:
+            times = np.linspace(0, end_time, len(cap_voltage_data))
+        
+        print(f"Initial voltage: {cap_voltage_data[0]:.3f}V")
+        print(f"Final voltage: {cap_voltage_data[-1]:.3f}V")
+        
+        # Verify exponential decay: V(t) = V0 * exp(-t/τ)
+        initial_voltage = cap_voltage_data[0]
+        final_voltage = cap_voltage_data[-1]
+        
+        # Should start near 5V and decay towards 0V
+        self.assertGreater(initial_voltage, 4.5, "Should start near 5V")
+        self.assertLess(final_voltage, 0.5, "Should decay close to 0V after 5τ")
+        
+        # Check voltage at 1τ should be ~37% of initial (e^-1 ≈ 0.368)
+        time_1tau_idx = np.argmin(np.abs(times - tau))
+        voltage_1tau = cap_voltage_data[time_1tau_idx]
+        expected_1tau = initial_voltage * np.exp(-1)
+        
+        print(f"Voltage at 1τ: {voltage_1tau:.3f}V (expected: {expected_1tau:.3f}V)")
+        self.assertAlmostEqual(voltage_1tau, expected_1tau, delta=0.5, 
+                             msg="Voltage at 1τ should be ~37% of initial")
+        
+        # Plot and save results
+        self.plot_and_save_transient(
+            times, [cap_voltage_data], ("V(capacitor)",),
+            title="RC Discharging Transient (τ=1ms)",
+            filename="rc_discharging_transient.png"
+        )
+        
+        # Validate against golden file
+        self.assert_waveform_matches_golden(
+            "rc_discharging_2k_0p5uF.csv",
+            times,
+            [cap_voltage_data],
+            ("V(capacitor)",)
+        )
+        
+        print("✓ RC discharging transient analysis completed successfully!")
     
     def test_multiple_time_constants(self):
         """Test RC circuits with different time constants using real PySpice simulations."""
@@ -196,6 +276,11 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
             vs = VoltageSource(voltage=5.0)
             r1 = Resistor(resistance=config["R"])
             c1 = Capacitor(capacitance=config["C"])
+            
+            # Add components to circuit
+            circuit.add_component(vs)
+            circuit.add_component(r1)
+            circuit.add_component(c1)
             
             # Wire the circuit
             circuit.wire(vs.neg, circuit.gnd)

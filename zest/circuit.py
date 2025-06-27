@@ -4,19 +4,7 @@ Circuit class for representing and manipulating electronic circuits as graphs.
 
 from .nodes import Node, gnd
 
-# Global registry to track current circuit for component auto-registration
-_current_circuit = None
-
-
-def get_current_circuit():
-    """Get the current circuit context."""
-    return _current_circuit
-
-
-def set_current_circuit(circuit):
-    """Set the current circuit context."""
-    global _current_circuit
-    _current_circuit = circuit
+# No global circuit registry - components must be explicitly added to circuits
 
 
 class Circuit:
@@ -32,9 +20,11 @@ class Circuit:
         self.gnd = gnd   # Circuit's ground reference
         self._component_names = {}  # Maps component -> final name
         self._initial_conditions = {}  # Maps terminal -> initial voltage
+        self.pins = {}  # Maps pin name -> Terminal for subcircuit definitions
+        self._include_models = set()  # Set of external SPICE model text to include
+        self.includes = []  # List of external SPICE file dependencies
         
-        # Set this circuit as the current circuit for component auto-registration
-        set_current_circuit(self)
+        # Components must be explicitly added to circuits
     
     def add_component(self, component):
         """Add a component to the circuit."""
@@ -99,6 +89,44 @@ class Circuit:
         
         self._initial_conditions[terminal] = voltage
     
+    def add_pin(self, name, terminal):
+        """
+        Exposes an internal terminal as an external pin of the circuit.
+        This is necessary when this circuit is used as a subcircuit definition.
+
+        Args:
+            name: The external name for the pin (e.g., "input", "output", "vcc").
+            terminal: The internal Terminal object to expose.
+        """
+        from .components import Terminal  # Avoid circular import issues
+        if not isinstance(terminal, Terminal):
+            raise TypeError(f"Pin must be connected to a Terminal, not {type(terminal)}.")
+        if terminal.component not in self.components:
+            raise ValueError("Cannot add a pin to a terminal of a component that is not in this circuit.")
+
+        self.pins[name] = terminal
+    
+    def include_model(self, model_text):
+        """
+        Include external SPICE model definitions in this circuit.
+        
+        Args:
+            model_text: Raw SPICE text containing .SUBCKT/.MODEL definitions
+        """
+        if isinstance(model_text, str) and model_text.strip():
+            self._include_models.add(model_text.strip())
+    
+    def add_include(self, path: str):
+        """
+        Registers an external SPICE file (.INCLUDE) dependency for this circuit.
+        Paths should be relative to the simulation execution directory.
+
+        Args:
+            path: The path to the .lib, .mod, or .inc file.
+        """
+        if path not in self.includes:
+            self.includes.append(path)
+    
     def get_initial_condition(self, terminal):
         """
         Get the initial voltage for a terminal.
@@ -124,10 +152,10 @@ class Circuit:
         
         for component in self.components:
             # Use requested name if provided, otherwise auto-generate
+            prefix = component.get_component_type_prefix()
             if component._requested_name:
-                self._component_names[component] = component._requested_name
+                self._component_names[component] = f"{prefix}{component._requested_name}"
             else:
-                prefix = component.get_component_type_prefix()
                 type_counts[prefix] = type_counts.get(prefix, 0) + 1
                 self._component_names[component] = f"{prefix}{type_counts[prefix]}"
     
@@ -136,6 +164,55 @@ class Circuit:
         if component not in self._component_names:
             self._assign_component_names()
         return self._component_names[component]
+    
+    def _compile_as_subcircuit(self):
+        """Helper to compile this circuit into a .SUBCKT block."""
+        # This compilation must happen in a 'sandboxed' way. Node names inside the
+        # subcircuit should be relative to its pins, not the parent circuit's wiring.
+        self._assign_component_names()
+        
+        # Update component names to match our assignments
+        for component in self.components:
+            component.name = self.get_component_name(component)
+
+        pin_order = list(self.pins.keys())
+        header = f".SUBCKT {self.name} {' '.join(pin_order)}"
+
+        body_lines = []
+        
+        # Store reference to the original method before any overrides
+        original_get_node_method = self.get_spice_node_name
+        
+        for component in self.components:
+            # IMPORTANT: For node name resolution, we need a mapping from internal terminals
+            # to the public pin names.
+
+            # Create a temporary mapping for this subcircuit's compilation.
+            def get_subcircuit_node_name(terminal):
+                # Check if this terminal (or any terminal it's connected to) is an exposed pin.
+                for pin_name, pin_terminal in self.pins.items():
+                    # The `_find_connected_terminals` method correctly finds all electrically
+                    # common points within this circuit's context.
+                    if pin_terminal in self._find_connected_terminals(terminal):
+                        return pin_name
+
+                # If not a pin, it's an internal node. Use the standard naming scheme,
+                # but ensure it's unique within the context of this subcircuit.
+                # Call the original method directly to avoid recursion.
+                return original_get_node_method(terminal)
+
+            # Temporarily override the get_spice_node_name method for this component's to_spice call
+            self.get_spice_node_name = get_subcircuit_node_name
+
+            try:
+                body_lines.append(component.to_spice(self))
+            finally:
+                # Restore the original method
+                self.get_spice_node_name = original_get_node_method
+
+        footer = f".ENDS {self.name}"
+
+        return "\n".join([header] + body_lines + [footer])
     
     def get_spice_node_name(self, terminal):
         """
@@ -195,41 +272,84 @@ class Circuit:
         return visited
     
     def compile_to_spice(self):
-        """Compile the circuit to SPICE netlist format."""
-        # Assign component names first
+        """Compile the circuit to SPICE netlist format, including subcircuits and includes."""
+        from .components import SubCircuit
+
+        # 1. Recursively collect all unique include paths from the entire design.
+        #    Using a set handles de-duplication automatically.
+        all_includes = set(self.includes)
+        circuits_to_scan = [self]
+        scanned_definitions = {self}
+
+        while circuits_to_scan:
+            current_circuit = circuits_to_scan.pop()
+            for component in current_circuit.components:
+                if isinstance(component, SubCircuit):
+                    definition = component.definition
+                    if definition not in scanned_definitions:
+                        all_includes.update(definition.includes)
+                        scanned_definitions.add(definition)
+                        circuits_to_scan.append(definition) # Scan for nested subcircuits
+
+        # 2. Assign component names for the entire circuit.
         self._assign_component_names()
-        
-        # Update component names to match our assignments
         for component in self.components:
             component.name = self.get_component_name(component)
+
+        # 3. Build the netlist string.
+        lines = [f"* Circuit: {self.name}", ""]
+
+        # 4. Write the clean, de-duplicated .INCLUDE block first.
+        if all_includes:
+            lines.append("* ===== Model Includes ===== *")
+            for include_path in sorted(list(all_includes)):
+                lines.append(f'.INCLUDE "{include_path}"')
+            lines.append("")
+
+        # Add external model includes (legacy support)
+        if self._include_models:
+            lines.append("* ===== External Model Definitions ===== *")
+            for model_text in sorted(self._include_models):
+                lines.append(model_text)
+                lines.append("")
+
+        # 5. Find and write all unique .SUBCKT definitions.
+        unique_definitions = {
+            comp.definition for comp in self.components if isinstance(comp, SubCircuit)
+        }
         
-        lines = []
-        lines.append(f"* Circuit: {self.name}")
-        lines.append("")
+        # Filter out external-only subcircuits (defined in .INCLUDE files)
+        internal_definitions = {
+            definition for definition in unique_definitions
+            if not getattr(definition, '_is_external_only', False)
+        }
         
-        # Add components
+        if internal_definitions:
+            lines.append("* ===== Subcircuit Definitions ===== *")
+            # Sort for consistent output in golden file testing
+            for definition in sorted(list(internal_definitions), key=lambda c: c.name):
+                lines.append(definition._compile_as_subcircuit())
+                lines.append("")
+            lines.append("* ===== Main Circuit Components ===== *")
+
+        # 6. Write the main circuit component and instance lines.
         for component in self.components:
             lines.append(component.to_spice(self))
-        
-        # Add initial conditions if any are set
+
+        # 7. Add initial conditions if any.
         if self._initial_conditions:
             lines.append("")
             lines.append("* Initial Conditions")
-            
-            # Group initial conditions by node
             node_ics = {}
             for terminal, voltage in self._initial_conditions.items():
                 node_name = self.get_spice_node_name(terminal)
-                if node_name != "gnd":  # Skip ground (always 0V)
+                if node_name != "gnd":
                     node_ics[node_name] = voltage
-            
-            # Add .IC directive for each node
             for node_name, voltage in node_ics.items():
                 lines.append(f".IC V({node_name})={voltage}")
-        
+
         lines.append("")
         lines.append(".end")
-        
         return "\n".join(lines)
     
     def get_simulator(self):

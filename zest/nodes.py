@@ -3,7 +3,7 @@ class Node:
     Represents a node (connection point) in a circuit.
     """
     _node_counter = 0
-    
+    []
     def __init__(self, name=None):
         if name is None:
             Node._node_counter += 1

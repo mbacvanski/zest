@@ -42,6 +42,10 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         vs = VoltageSource(voltage=12.0)
         r1 = Resistor(resistance=1000)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        
         circuit.wire(vs.pos, r1.n1)
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(r1.n2, circuit.gnd)
@@ -60,9 +64,9 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         
         # The voltage across the resistor should be 12V (since other end is at ground)
         # Look for the node that connects vs.pos to r1.n1
-        node_voltages = list(results.nodes.values())
+        node_voltages = [results._extract_value(v) for v in results.nodes.values()]
         self.assertTrue(any(abs(v - 12.0) < 0.1 for v in node_voltages), 
-                       f"Expected ~12V somewhere in nodes: {results.nodes}")
+                       f"Expected ~12V somewhere in nodes: {node_voltages}")
     
     def test_voltage_divider_dc_analysis(self):
         """Test DC analysis of voltage divider - verify Ohm's law."""
@@ -73,6 +77,11 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         vs = VoltageSource(voltage=10.0)
         r1 = Resistor(resistance=1000)  # 1kΩ
         r2 = Resistor(resistance=2000)  # 2kΩ
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(r2)
         
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
@@ -88,16 +97,16 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         
         # Check for expected voltage divider result (~6.67V)
         expected_voltage = 10.0 * (2000.0 / (1000.0 + 2000.0))  # 6.67V
-        node_voltages = list(results.nodes.values())
+        node_voltages = [results._extract_value(v) for v in results.nodes.values()]
         
         # Should have voltage source voltage (~10V) and divided voltage (~6.67V)
         has_source_voltage = any(abs(v - 10.0) < 0.1 for v in node_voltages)
         has_divided_voltage = any(abs(v - expected_voltage) < 0.1 for v in node_voltages)
         
         self.assertTrue(has_source_voltage, 
-                       f"Expected ~10V somewhere in nodes: {results.nodes}")
+                       f"Expected ~10V somewhere in nodes: {node_voltages}")
         self.assertTrue(has_divided_voltage, 
-                       f"Expected ~{expected_voltage:.2f}V somewhere in nodes: {results.nodes}")
+                       f"Expected ~{expected_voltage:.2f}V somewhere in nodes: {node_voltages}")
     
     def test_rc_circuit_transient_analysis(self):
         """Test transient analysis of RC circuit - verify charging behavior."""
@@ -108,6 +117,11 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
         c1 = Capacitor(capacitance=1e-6)
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
         
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
@@ -145,6 +159,10 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         vs = VoltageSource(voltage=1.0)  # 1V AC source
         r1 = Resistor(resistance=1000)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
         circuit.wire(r1.n2, circuit.gnd)
@@ -166,29 +184,45 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         """Test DC sweep analysis - verify linear response."""
         circuit = Circuit("DC Sweep Test")
         
-        # Simple resistor circuit for DC sweep
+        # Simple series resistor circuit for DC sweep
         vs = VoltageSource(voltage=1.0)  # Will be swept
         r1 = Resistor(resistance=1000)
+        r_load = Resistor(resistance=1000)  # Load resistor to create proper series circuit
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(r_load)
+        
+        # Create series circuit: vs -> r1 -> r_load -> gnd
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
-        circuit.wire(r1.n2, circuit.gnd)
+        circuit.wire(r1.n2, r_load.n1)  # Series connection
+        circuit.wire(r_load.n2, circuit.gnd)
         
-        try:
-            # Sweep voltage source from 0V to 10V in 1V steps
-            results = circuit.simulate_dc_sweep(source_name="V1", start=0, stop=10, step=1)
-            
-            # Verify we got results
-            self.assertIsNotNone(results)
-            self.assertEqual(results.analysis_type, "DC Sweep")
-            
-            # Should have sweep data
-            self.assertGreater(len(results.nodes), 0)
-            print(f"DC sweep completed with {len(results.nodes)} sweep points")
-        except Exception as e:
-            # DC sweep might have PySpice API issues, just note it
-            print(f"DC sweep failed (expected for this PySpice version): {e}")
-            self.skipTest("DC sweep not working with this PySpice version")
+        # Get the actual component name assigned by Zest
+        vs_name = circuit.get_component_name(vs)
+        print(f"Voltage source component name: {vs_name}")
+        
+        # Debug: Show the generated SPICE netlist
+        spice_netlist = circuit.compile_to_spice()
+        print("Generated SPICE netlist:")
+        print(spice_netlist)
+        
+        # Sweep voltage source from 0V to 10V in 1V steps
+        results = circuit.simulate_dc_sweep(source_name=vs_name, start=0, stop=10, step=1)
+        
+        # Verify we got results
+        self.assertIsNotNone(results)
+        self.assertEqual(results.analysis_type, "DC Sweep")
+        
+        # Should have sweep data
+        self.assertGreater(len(results.nodes), 0)
+        
+        # Verify the circuit has the expected number of components
+        self.assertEqual(len(circuit.components), 3)  # vs, r1, r_load
+        
+        print(f"DC sweep completed with {len(results.nodes)} sweep points")
     
     def test_complex_circuit_simulation(self):
         """Test simulation of more complex circuit with multiple components."""
@@ -201,6 +235,14 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         r2 = Resistor(resistance=2000)   # Second stage
         c2 = Capacitor(capacitance=2e-6)
         r_load = Resistor(resistance=10000)  # Load
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(c1)
+        circuit.add_component(r2)
+        circuit.add_component(c2)
+        circuit.add_component(r_load)
         
         # Wire the multi-stage filter
         circuit.wire(vs.neg, circuit.gnd)
@@ -234,6 +276,11 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         r1 = Resistor(resistance=1500)
         r2 = Resistor(resistance=3000)
         
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(r2)
+        
         circuit.wire(vs.neg, circuit.gnd)
         circuit.wire(vs.pos, r1.n1)
         circuit.wire(r1.n2, r2.n1)
@@ -253,7 +300,7 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         
         # Verify voltage division: 15V * (3000/(1500+3000)) = 10V
         expected_voltage = 15.0 * (3000.0 / (1500.0 + 3000.0))  # 10V
-        node_voltages = list(results.nodes.values())
+        node_voltages = [results._extract_value(v) for v in results.nodes.values()]
         has_expected_voltage = any(abs(v - expected_voltage) < 0.1 for v in node_voltages)
         
         self.assertTrue(has_expected_voltage,
@@ -271,6 +318,12 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         r2 = Resistor(resistance=2000)  # 6mA  
         r3 = Resistor(resistance=3000)  # 4mA
         # Total current should be 22mA
+        
+        # Add components to circuit
+        circuit.add_component(vs)
+        circuit.add_component(r1)
+        circuit.add_component(r2)
+        circuit.add_component(r3)
         
         # Wire multiple resistors to the same voltage source terminal
         circuit.wire(vs.pos, r1.n1)  # First connection
@@ -300,7 +353,7 @@ class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
         self.assertIsNotNone(results)
         
         # All resistors should see the full 12V (parallel connection)
-        node_voltages = list(results.nodes.values())
+        node_voltages = [results._extract_value(v) for v in results.nodes.values()]
         source_voltage_present = any(abs(v - 12.0) < 0.1 for v in node_voltages)
         self.assertTrue(source_voltage_present, 
                        f"Expected ~12V in parallel circuit: {results.nodes}")
@@ -335,6 +388,10 @@ class TestCircuitValidation(GoldenTestMixin, unittest.TestCase):
         # Create components but don't wire them
         vs = VoltageSource(voltage=5.0)
         r1 = Resistor(resistance=1000)
+        
+        # Add components to circuit explicitly
+        circuit.add_component(vs)
+        circuit.add_component(r1)
         
         # Components are registered but not connected
         self.assertEqual(len(circuit.components), 2)
