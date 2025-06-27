@@ -26,11 +26,19 @@ def main():
     print("Building voltage divider circuit (terminal-only connections)...")
     circuit = Circuit("Voltage Divider with Capacitor")
     
-    # Add components using terminal connections only
-    vs = VoltageSource(gnd, None, voltage=10.0)       # 10V source, negative unconnected
-    r1 = Resistor(vs.pos, None, resistance=1000)      # 1kΩ from VS positive
-    r2 = Resistor(r1.n2, vs.neg, resistance=2000)     # 2kΩ from R1 output to VS negative (ground)
-    c1 = Capacitor(r1.n2, vs.neg, capacitance=1e-6)   # 1µF capacitor parallel to R2
+    # Create components
+    vs = VoltageSource(voltage=10.0)       # 10V source
+    r1 = Resistor(resistance=1000)         # 1kΩ resistor
+    r2 = Resistor(resistance=2000)         # 2kΩ resistor
+    c1 = Capacitor(capacitance=1e-6)       # 1µF capacitor
+    
+    # Wire them using terminal connections
+    circuit.wire(vs.neg, gnd)              # Connect VS negative to ground
+    circuit.wire(vs.pos, r1.n1)            # Connect VS positive to R1 input
+    circuit.wire(r1.n2, r2.n1)             # Connect R1 output to R2 input (voltage divider)
+    circuit.wire(r2.n2, gnd)               # Connect R2 output to ground
+    circuit.wire(c1.pos, r1.n2)            # Connect capacitor positive to voltage divider output
+    circuit.wire(c1.neg, gnd)              # Connect capacitor negative to ground
     
     print(f"Created circuit with {len(circuit.components)} components")
     print(f"Circuit: {circuit}")
@@ -102,8 +110,13 @@ def simple_resistor_example():
     
     # Very simple circuit: voltage source and resistor using terminal connections
     circuit = Circuit("Simple Test")
-    vs = VoltageSource(gnd, None, voltage=5.0)
-    r1 = Resistor(vs.pos, vs.neg, resistance=1000)  # Direct connection from pos to neg through resistor
+    vs = VoltageSource(voltage=5.0)
+    r1 = Resistor(resistance=1000)
+    
+    # Wire them: VS through resistor to ground
+    circuit.wire(vs.neg, gnd)
+    circuit.wire(vs.pos, r1.n1)
+    circuit.wire(r1.n2, gnd)
     
     print("SPICE netlist:")
     print(circuit.compile_to_spice())
@@ -122,10 +135,16 @@ def rc_filter_simulation():
     
     circuit = Circuit("RC Low-Pass Filter")
     
-    # Build RC filter using terminal connections
-    vs = VoltageSource(gnd, None, voltage=5.0)
-    r1 = Resistor(vs.pos, None, resistance=1000)      # Series resistor
-    c1 = Capacitor(r1.n2, vs.neg, capacitance=1e-6)   # Capacitor to ground
+    # Create RC filter components
+    vs = VoltageSource(voltage=5.0)
+    r1 = Resistor(resistance=1000)      # Series resistor
+    c1 = Capacitor(capacitance=1e-6)    # Filter capacitor
+    
+    # Wire RC filter
+    circuit.wire(vs.neg, gnd)            # VS negative to ground
+    circuit.wire(vs.pos, r1.n1)         # VS positive to resistor input
+    circuit.wire(r1.n2, c1.pos)         # Resistor output to capacitor (filter output)
+    circuit.wire(c1.neg, gnd)           # Capacitor to ground
     
     # Calculate expected corner frequency
     corner_freq = 1 / (2 * 3.14159 * 1000 * 1e-6)

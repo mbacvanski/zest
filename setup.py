@@ -1,15 +1,5 @@
-from setuptools import setup, find_packages
+# This file exists for backward compatibility.
+# All package configuration is now in pyproject.toml
+from setuptools import setup
 
-setup(
-    name="zest",
-    version="0.1.0",
-    description="Object-oriented circuit graph wrapper for PySpice",
-    author="Your Name",
-    packages=find_packages(),
-    install_requires=[
-        "pyspice",
-        "networkx",
-        "matplotlib"
-    ],
-    python_requires=">=3.7",
-) 
+setup() 

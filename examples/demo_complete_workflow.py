@@ -18,10 +18,16 @@ def build_voltage_divider():
     
     circuit = Circuit("Voltage Divider")
     
-    # Use terminal connections only - no string nodes
-    vs = VoltageSource(gnd, None, voltage=12.0)
-    r1 = Resistor(vs.pos, None, resistance=1000)   # 1kΩ from VS positive
-    r2 = Resistor(r1.n2, vs.neg, resistance=2000)  # 2kΩ from R1 to VS negative
+    # Create components
+    vs = VoltageSource(voltage=12.0)
+    r1 = Resistor(resistance=1000)   # 1kΩ
+    r2 = Resistor(resistance=2000)   # 2kΩ
+    
+    # Wire using terminal connections
+    circuit.wire(vs.neg, gnd)         # Connect VS negative to ground
+    circuit.wire(vs.pos, r1.n1)       # Connect VS positive to R1
+    circuit.wire(r1.n2, r2.n1)        # Connect R1 to R2
+    circuit.wire(r2.n2, gnd)          # Connect R2 to ground
     
     print(f"Created {len(circuit.components)} components:")
     for component in circuit.components:
@@ -38,10 +44,16 @@ def build_rc_filter():
     
     circuit = Circuit("RC Filter")
     
-    # Chain components using terminal connections only
-    vs = VoltageSource(gnd, None, voltage=5.0)
-    r1 = Resistor(vs.pos, None, resistance=1000)     # 1kΩ series resistor
-    c1 = Capacitor(r1.n2, vs.neg, capacitance=1e-6)  # 1µF to ground
+    # Create components
+    vs = VoltageSource(voltage=5.0)
+    r1 = Resistor(resistance=1000)     # 1kΩ series resistor
+    c1 = Capacitor(capacitance=1e-6)   # 1µF
+    
+    # Wire RC filter
+    circuit.wire(vs.neg, gnd)          # VS negative to ground
+    circuit.wire(vs.pos, r1.n1)        # VS positive to resistor
+    circuit.wire(r1.n2, c1.pos)        # Resistor output to capacitor
+    circuit.wire(c1.neg, gnd)          # Capacitor to ground
     
     # Calculate corner frequency
     corner_freq = 1 / (2 * 3.14159 * 1000 * 1e-6)
@@ -58,11 +70,18 @@ def build_rlc_circuit():
     
     circuit = Circuit("RLC Resonator")
     
-    # Series RLC using terminal connections only
-    vs = VoltageSource(gnd, None, voltage=1.0)
-    r1 = Resistor(vs.pos, None, resistance=10)           # 10Ω series resistance
-    l1 = Inductor(r1.n2, None, inductance=1e-3)         # 1mH series inductance
-    c1 = Capacitor(l1.n2, vs.neg, capacitance=10e-6)    # 10µF series capacitance
+    # Create RLC components
+    vs = VoltageSource(voltage=1.0)
+    r1 = Resistor(resistance=10)           # 10Ω series resistance
+    l1 = Inductor(inductance=1e-3)         # 1mH series inductance
+    c1 = Capacitor(capacitance=10e-6)      # 10µF
+    
+    # Wire series RLC
+    circuit.wire(vs.neg, gnd)              # VS negative to ground
+    circuit.wire(vs.pos, r1.n1)           # VS positive to resistor
+    circuit.wire(r1.n2, l1.n1)            # Resistor to inductor
+    circuit.wire(l1.n2, c1.pos)           # Inductor to capacitor
+    circuit.wire(c1.neg, gnd)             # Capacitor to ground
     
     # Calculate resonant frequency
     import math
@@ -135,19 +154,23 @@ def demonstrate_api_features():
     circuit = Circuit("API Demo")
     
     print("1. Auto-naming and auto-registration:")
-    vs = VoltageSource(gnd, None, voltage=3.3)
+    vs = VoltageSource(voltage=3.3)
     print(f"   VoltageSource auto-named: {vs.name}")
     
-    r1 = Resistor(vs.pos, None, resistance=1000)  # Connect to VS positive terminal
+    r1 = Resistor(resistance=1000)
+    circuit.wire(vs.pos, r1.n1)  # Connect to VS positive terminal
     print(f"   Resistor auto-named: {r1.name}")
     
     print(f"   Circuit now has {len(circuit.components)} components")
     
     print("\n2. Terminal connections:")
-    r2 = Resistor(vs.pos, None, resistance=2000)    # Connect to voltage source positive
+    r2 = Resistor(resistance=2000)
+    circuit.wire(vs.pos, r2.n1)    # Connect to voltage source positive
     print(f"   Connected R2 to vs.pos (which is '{vs.pos}')")
     
-    c1 = Capacitor(r2.n2, vs.neg, capacitance=1e-6) # Connect R2 output to capacitor
+    c1 = Capacitor(capacitance=1e-6)
+    circuit.wire(r2.n2, c1.pos)  # Connect R2 output to capacitor
+    circuit.wire(vs.neg, c1.neg)  # Connect VS negative to capacitor
     print(f"   Connected C1 between r2.n2 ('{r2.n2}') and vs.neg ('{vs.neg}')")
     
     print("\n3. Available terminal aliases:")
@@ -158,16 +181,14 @@ def demonstrate_api_features():
     
     print("\n4. Supported connection types:")
     print("   ✓ Terminal connections: vs.pos, r2.n2 (type-safe!)")
-    print("   ✓ Ground reference: gnd (special Node object)")
-    print("   ✓ Unconnected: None (auto-generates node)")
+    print("   ✓ Ground reference: gnd (special GroundTerminal object)")
+    print("   ✓ Explicit wiring: circuit.wire(terminal1, terminal2)")
     print("   ✗ String nodes: NO LONGER SUPPORTED")
     
-    print("\n5. Error handling for old API:")
-    try:
-        # This should fail with clear error message
-        bad_resistor = Resistor("invalid", "string", resistance=100)
-    except ValueError as e:
-        print(f"   String node error (as expected): {e}")
+    print("\n5. New Terminal-only design:")
+    print(f"   ✓ gnd is GroundTerminal: {type(gnd).__name__}")
+    print(f"   ✓ All connection points are Terminals")
+    print(f"   ✓ No redundant Node class")
 
 def demonstrate_chaining_patterns():
     """Show different chaining patterns."""
@@ -176,22 +197,39 @@ def demonstrate_chaining_patterns():
     circuit = Circuit("Chaining Demo")
     
     print("Pattern 1: Linear chain")
-    vs1 = VoltageSource(gnd, None, voltage=12.0)
-    r1 = Resistor(vs1.pos, None, resistance=1000)
-    r2 = Resistor(r1.n2, None, resistance=2000)
-    r3 = Resistor(r2.n2, vs1.neg, resistance=3000)
+    vs1 = VoltageSource(voltage=12.0)
+    r1 = Resistor(resistance=1000)
+    r2 = Resistor(resistance=2000)
+    r3 = Resistor(resistance=3000)
+    # Wire linear chain: VS -> R1 -> R2 -> R3 -> GND
+    circuit.wire(vs1.neg, gnd)
+    circuit.wire(vs1.pos, r1.n1)
+    circuit.wire(r1.n2, r2.n1)
+    circuit.wire(r2.n2, r3.n1)
+    circuit.wire(r3.n2, gnd)
     print(f"  Chain: {vs1.name} -> {r1.name} -> {r2.name} -> {r3.name}")
     
     print("\nPattern 2: Parallel branches")
-    vs2 = VoltageSource(gnd, None, voltage=5.0)
-    r4 = Resistor(vs2.pos, vs2.neg, resistance=1000)  # Branch 1
-    r5 = Resistor(vs2.pos, vs2.neg, resistance=2000)  # Branch 2 (parallel)
+    vs2 = VoltageSource(voltage=5.0)
+    r4 = Resistor(resistance=1000)  # Branch 1
+    r5 = Resistor(resistance=2000)  # Branch 2 (parallel)
+    # Wire parallel branches
+    circuit.wire(vs2.neg, gnd)
+    circuit.wire(vs2.pos, r4.n1)    # Branch 1
+    circuit.wire(vs2.pos, r5.n1)    # Branch 2 (parallel)
+    circuit.wire(r4.n2, gnd)
+    circuit.wire(r5.n2, gnd)
     print(f"  Parallel: {r4.name} || {r5.name} across {vs2.name}")
     
     print("\nPattern 3: RC filter chain")
-    vs3 = VoltageSource(gnd, None, voltage=10.0)
-    r6 = Resistor(vs3.pos, None, resistance=1000)     # Series R
-    c2 = Capacitor(r6.n2, vs3.neg, capacitance=1e-6)  # Shunt C
+    vs3 = VoltageSource(voltage=10.0)
+    r6 = Resistor(resistance=1000)     # Series R
+    c2 = Capacitor(capacitance=1e-6)   # Shunt C
+    # Wire RC filter
+    circuit.wire(vs3.neg, gnd)
+    circuit.wire(vs3.pos, r6.n1)       # VS to resistor
+    circuit.wire(r6.n2, c2.pos)        # Resistor to capacitor (output)
+    circuit.wire(c2.neg, gnd)          # Capacitor to ground
     print(f"  RC filter: {vs3.name} -> {r6.name} -> (output), {c2.name} to ground")
 
 def main():

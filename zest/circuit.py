@@ -2,7 +2,7 @@
 Circuit class for representing and manipulating electronic circuits as graphs.
 """
 
-from .nodes import Node, gnd
+from .components import gnd
 
 # No global circuit registry - components must be explicitly added to circuits
 
@@ -56,9 +56,9 @@ class Circuit:
             raise ValueError(f"terminal2 must be a Terminal or gnd, got {type(terminal2)}")
         
         # Register components with the circuit if they have terminals
-        if isinstance(terminal1, Terminal) and terminal1.component not in self.components:
+        if isinstance(terminal1, Terminal) and terminal1.component is not None and terminal1.component not in self.components:
             self.add_component(terminal1.component)
-        if isinstance(terminal2, Terminal) and terminal2.component not in self.components:
+        if isinstance(terminal2, Terminal) and terminal2.component is not None and terminal2.component not in self.components:
             self.add_component(terminal2.component)
         
         # Add wire connection - prevent duplicate wires between same endpoints
@@ -101,7 +101,7 @@ class Circuit:
         from .components import Terminal  # Avoid circular import issues
         if not isinstance(terminal, Terminal):
             raise TypeError(f"Pin must be connected to a Terminal, not {type(terminal)}.")
-        if terminal.component not in self.components:
+        if terminal.component is not None and terminal.component not in self.components:
             raise ValueError("Cannot add a pin to a terminal of a component that is not in this circuit.")
 
         self.pins[name] = terminal

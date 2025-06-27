@@ -14,9 +14,32 @@ Zest makes circuit design simple by treating circuits as graphs: components are 
 
 ## Quick Start
 
+### Installation for Users
 ```bash
-pip install -r requirements.txt
+pip install zest
 ```
+
+### Development Setup
+For development and running examples:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/zest.git
+cd zest
+
+# Install in development mode (links to source code)
+pip install -e .
+
+# Or install with development dependencies
+pip install -e ".[dev]"
+
+# Now you can run examples
+python examples/example_subcircuit.py
+```
+
+The development installation creates an editable link to your source code, so changes are immediately reflected without reinstalling.
+
+## Basic Usage
 
 ```python
 from zest import Circuit, VoltageSource, Resistor

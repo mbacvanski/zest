@@ -2,27 +2,55 @@
 Component classes for electronic circuit elements.
 """
 
-from .nodes import Node
-
 
 class Terminal:
-    """Represents a connection terminal on a component."""
+    """Represents a connection terminal/node in a circuit."""
+    _terminal_counter = 0
     
-    def __init__(self, component, terminal_name):
+    def __init__(self, component=None, terminal_name=None):
         self.component = component
         self.terminal_name = terminal_name
-        # The terminal itself is a node in the circuit graph
-        self._node = Node(f"{id(component)}.{terminal_name}")  # Use component ID for unique node name
+        
+        # Generate unique terminal name for SPICE
+        if component is not None and terminal_name is not None:
+            # Component terminal: use component ID and terminal name
+            self.name = f"{id(component)}.{terminal_name}"
+        else:
+            # Standalone terminal (like ground): use auto-generated name
+            Terminal._terminal_counter += 1
+            self.name = f"t{Terminal._terminal_counter}"
     
     def __str__(self):
-        # Use actual component name when available, fallback to component class + ID
-        if hasattr(self.component, 'name') and self.component.name != "UNNAMED":
-            return f"{self.component.name}.{self.terminal_name}"
+        if self.component is not None:
+            # Use actual component name when available, fallback to component class + ID
+            if hasattr(self.component, 'name') and self.component.name != "UNNAMED":
+                return f"{self.component.name}.{self.terminal_name}"
+            else:
+                return f"{self.component.__class__.__name__}_{id(self.component) % 10000}.{self.terminal_name}"
         else:
-            return f"{self.component.__class__.__name__}_{id(self.component) % 10000}.{self.terminal_name}"
+            # Standalone terminal
+            return self.name
     
     def __repr__(self):
         return f"Terminal({self})"
+
+
+class GroundTerminal(Terminal):
+    """Special terminal representing circuit ground."""
+    
+    def __init__(self):
+        super().__init__(component=None, terminal_name=None)
+        self.name = "gnd"
+    
+    def __str__(self):
+        return "gnd"
+    
+    def __repr__(self):
+        return "GroundTerminal()"
+
+
+# Create a global ground terminal instance
+gnd = GroundTerminal()
 
 
 class Component:

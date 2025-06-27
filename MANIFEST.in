@@ -1,0 +1,10 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include requirements.txt
+recursive-include zest *.py
+recursive-include tests *.py
+recursive-include examples *.py *.spice *.png
+recursive-exclude * __pycache__
+recursive-exclude * *.pyc
+recursive-exclude * *.pyo 
