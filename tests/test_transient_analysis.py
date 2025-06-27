@@ -68,46 +68,36 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         print(f"- Number of points: {int(end_time/step_time)}")
         
         # Run transient analysis using Zest
-        results = circuit.simulate_transient(step_time=step_time, end_time=end_time)
+        simulated_circuit = circuit.simulate_transient(step_time=step_time, end_time=end_time)
         
         # Verify we got results
-        self.assertIsNotNone(results)
-        self.assertEqual(results.analysis_type, "Transient Analysis")
+        self.assertIsNotNone(simulated_circuit)
+        self.assertEqual(simulated_circuit.analysis_type, "Transient Analysis")
         
         print(f"✓ Simulation completed successfully")
-        print(f"✓ Analysis type: {results.analysis_type}")
-        print(f"✓ Found {len(results.nodes)} node voltages")
-        print(f"✓ Available nodes: {list(results.nodes.keys())}")
+        print(f"✓ Analysis type: {simulated_circuit.analysis_type}")
+        print(f"✓ Found {len(simulated_circuit.nodes)} node voltages")
+        print(f"✓ Available nodes: {list(simulated_circuit.nodes.keys())}")
         
-        # Extract REAL time and voltage data from PySpice results
-        # Find the capacitor node voltage - it should be the node between R and C
-        cap_node_name = None
-        input_node_name = None
+        # Use SimulatedCircuit methods to get component results
+        print("\n🔍 Using SimulatedCircuit methods to extract data:")
         
-        # Look for meaningful node names in the results
-        for node_name in results.nodes.keys():
-            if 'gnd' not in node_name.lower() and node_name != '0':
-                if cap_node_name is None:
-                    cap_node_name = node_name
-                elif input_node_name is None:
-                    input_node_name = node_name
+        # Get component results using the new API
+        c1_results = simulated_circuit.get_component_results(c1)
+        r1_results = simulated_circuit.get_component_results(r1)
+        vs_results = simulated_circuit.get_component_results(vs)
         
-        print(f"✓ Using capacitor node: {cap_node_name}")
-        print(f"✓ Using input node: {input_node_name}")
+        print(f"✓ Capacitor component name: {c1_results['component_name']}")
+        print(f"✓ Resistor component name: {r1_results['component_name']}")
+        print(f"✓ Voltage source component name: {vs_results['component_name']}")
         
-        # Extract the actual PySpice waveform data
-        cap_voltage_raw = results.nodes[cap_node_name]
-        input_voltage_raw = results.nodes[input_node_name] if input_node_name else None
+        # Extract terminal voltages from component results
+        cap_voltage_data = c1_results['terminal_voltages']['pos']  # Capacitor positive terminal
+        input_voltage_data = vs_results['terminal_voltages']['pos']  # Voltage source positive terminal
         
-        # Convert PySpice waveforms to numpy arrays
-        cap_voltage_data = results._extract_value(cap_voltage_raw)
-        
-        # Get the time vector from PySpice
-        if hasattr(results.pyspice_results, 'time'):
-            times = results._extract_value(results.pyspice_results.time)
-        elif hasattr(results.pyspice_results, 'abscissa'):
-            times = results._extract_value(results.pyspice_results.abscissa)
-        else:
+        # Get time vector using the new method
+        times = simulated_circuit.get_time_vector()
+        if times is None:
             # Fallback: create time vector based on simulation parameters
             print("⚠️  Could not extract time vector from PySpice, using simulation parameters")
             times = np.linspace(0, end_time, len(cap_voltage_data))
@@ -115,20 +105,15 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         # Ensure cap_voltage_data is a numpy array
         if not isinstance(cap_voltage_data, np.ndarray):
             cap_voltage_data = np.array(cap_voltage_data)
+        if not isinstance(input_voltage_data, np.ndarray):
+            input_voltage_data = np.array(input_voltage_data)
         
         print(f"✓ Extracted {len(times)} time points from PySpice")
         print(f"✓ Time range: {times[0]*1000:.2f}ms to {times[-1]*1000:.2f}ms")
         print(f"✓ Capacitor voltage range: {cap_voltage_data[0]:.3f}V to {cap_voltage_data[-1]:.3f}V")
         
         # Calculate resistor voltage: V_R = V_input - V_capacitor
-        if input_voltage_raw is not None:
-            input_voltage_data = results._extract_value(input_voltage_raw)
-            if not isinstance(input_voltage_data, np.ndarray):
-                input_voltage_data = np.array(input_voltage_data)
-            resistor_voltage_data = input_voltage_data - cap_voltage_data
-        else:
-            # Assume input is constant at vs.voltage
-            resistor_voltage_data = vs.voltage - cap_voltage_data
+        resistor_voltage_data = input_voltage_data - cap_voltage_data
         
         # Validate the RC response characteristics
         final_cap_voltage = cap_voltage_data[-1]
@@ -222,27 +207,17 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
             circuit.set_initial_condition(c1.pos, 0.0)
             
             # Run simulation
-            results = circuit.simulate_transient(step_time=step_time, end_time=end_time)
+            simulated_circuit = circuit.simulate_transient(step_time=step_time, end_time=end_time)
             
-            # Extract capacitor voltage
-            cap_node_name = None
-            for node_name in results.nodes.keys():
-                if 'gnd' not in node_name.lower() and node_name != '0':
-                    cap_node_name = node_name
-                    break
+            # Use SimulatedCircuit methods to get component results
+            c1_results = simulated_circuit.get_component_results(c1)
             
-            if cap_node_name is None:
-                print(f"⚠️  Could not find capacitor node for {config['name']}")
-                continue
-                
-            cap_voltage_data = results._extract_value(results.nodes[cap_node_name])
+            # Extract capacitor voltage from component results
+            cap_voltage_data = c1_results['terminal_voltages']['pos']  # Capacitor positive terminal
             
-            # Extract time vector
-            if hasattr(results.pyspice_results, 'time'):
-                times = results._extract_value(results.pyspice_results.time)
-            elif hasattr(results.pyspice_results, 'abscissa'):
-                times = results._extract_value(results.pyspice_results.abscissa)
-            else:
+            # Get time vector using the new method
+            times = simulated_circuit.get_time_vector()
+            if times is None:
                 times = np.linspace(0, end_time, len(cap_voltage_data))
             
             # Store for plotting - use first simulation's times as reference

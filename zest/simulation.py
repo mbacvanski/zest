@@ -185,6 +185,27 @@ class SimulatedCircuit:
     def __repr__(self):
         return f"SimulatedCircuit({self.analysis_type}, {len(self.circuit.components)} components, {len(self.nodes)} nodes, {len(self.branches)} branches)"
 
+    def get_time_vector(self):
+        """
+        Get the time vector from transient analysis results.
+        
+        Returns:
+            numpy.ndarray: Time values, or None if not available
+        """
+        if self.analysis_type != "Transient Analysis":
+            return None
+        
+        if self.pyspice_results is None:
+            return None
+        
+        # Try to extract time vector from PySpice results
+        if hasattr(self.pyspice_results, 'time'):
+            return self._extract_value(self.pyspice_results.time)
+        elif hasattr(self.pyspice_results, 'abscissa'):
+            return self._extract_value(self.pyspice_results.abscissa)
+        else:
+            return None
+
 
 class CircuitSimulator:
     """PySpice-based simulator for Zest circuits."""
