@@ -1,238 +1,138 @@
-# Zest 🔧
+# Zest ⚡
 
-**A clean, graph-based circuit building library for Python**
+**A clean, intuitive Python library for building electronic circuits**
 
-Zest is an object-oriented wrapper around PySpice that makes circuit building intuitive through a pure graph-based approach. Components are nodes, wires are edges, and the API enforces clear separation between component creation and circuit topology.
+Zest makes circuit design simple by treating circuits as graphs: components are nodes, wires are edges, and connections use type-safe terminals instead of error-prone string node names.
 
-## Features
+## Key Benefits
 
-- **🎯 Pure Graph API**: Components are created independently, wired together explicitly
-- **🔌 Type-Safe Terminals**: Connect components using terminal objects (e.g., `r1.n2`, `vs.pos`)
-- **⚡ Auto-Registration**: Components automatically join the current circuit
-- **📄 SPICE Export**: Generate clean SPICE netlists from your circuit graphs
-- **🔬 Simulation Ready**: Integrate with PySpice for analysis (DC, AC, transient)
-- **🛡️ Error Prevention**: No string node names to prevent connectivity bugs
+- **🎯 No String Nodes**: Connect components using terminal objects like `r1.n2` and `vs.pos` 
+- **🔌 Auto-Registration**: Components automatically join the current circuit context
+- **📐 Pure Graph API**: Clean separation between component creation and circuit topology
+- **⚡ PySpice Ready**: Export SPICE netlists and run simulations seamlessly
+- **🛡️ Error Prevention**: Type-safe connections prevent common wiring mistakes
 
-## Installation
+## Quick Start
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Requirements:
-- `networkx` - Graph data structures
-- `matplotlib` - Circuit visualization  
-- `pyspice` - SPICE simulation (optional)
-
-## Quick Start
-
 ```python
-from zest import Circuit, VoltageSource, Resistor, Capacitor
+from zest import Circuit, VoltageSource, Resistor
 
-# Create circuit
+# Create circuit and components
 circuit = Circuit("Voltage Divider")
-
-# Create components independently (no connections specified)
-voltage_source = VoltageSource(voltage=12.0)
+vs = VoltageSource(voltage=12.0)
 r1 = Resistor(resistance=1000)  # 1kΩ
 r2 = Resistor(resistance=2000)  # 2kΩ
 
-# Wire the components together
-circuit.wire(voltage_source.neg, circuit.gnd)     # VS negative to ground
-circuit.wire(voltage_source.pos, r1.n1)          # VS positive to R1 input
-circuit.wire(r1.n2, r2.n1)                       # R1 output to R2 input
-circuit.wire(r2.n2, circuit.gnd)                 # R2 output to ground
+# Wire using terminal objects (not strings!)
+circuit.wire(vs.pos, r1.n1)      # Source positive to R1
+circuit.wire(r1.n2, r2.n1)       # R1 to R2
+circuit.wire(vs.neg, circuit.gnd) # Source negative to ground
+circuit.wire(r2.n2, circuit.gnd) # R2 to ground
 
 # Generate SPICE netlist
 print(circuit.compile_to_spice())
 ```
 
-## Core Concepts
-
-### Graph-Based Architecture
-
-Zest treats circuits as graphs where:
-- **Components** are nodes with terminals
-- **Wires** are edges connecting terminals
-- **Terminals** are the only allowed connection points
-
-This approach eliminates common circuit building errors and makes topology explicit.
-
-### Component Creation
-
-Components are created independently without specifying connections:
-
-```python
-# Components created without any wiring
-vs = VoltageSource(voltage=5.0)      # Auto-named V1
-r1 = Resistor(resistance=1000)       # Auto-named R1  
-c1 = Capacitor(capacitance=1e-6)     # Auto-named C1
-l1 = Inductor(inductance=1e-3)       # Auto-named L1
-```
-
-### Explicit Wiring
-
-The `circuit.wire()` method connects terminals:
-
-```python
-circuit = Circuit("My Circuit")
-
-# Only terminal objects and circuit.gnd are allowed
-circuit.wire(vs.pos, r1.n1)          # ✅ Valid: terminal to terminal
-circuit.wire(r1.n2, circuit.gnd)     # ✅ Valid: terminal to ground
-circuit.wire(vs.neg, "node1")        # ❌ Error: no string nodes
-```
-
-### Terminal Reference
-
-Each component exposes terminals with intuitive names:
-
-| Component | Primary Terminals | Aliases |
-|-----------|------------------|---------|
-| `VoltageSource` | `.pos`, `.neg` | `.positive`, `.negative` |
-| `Resistor` | `.n1`, `.n2` | `.a`, `.b` |
-| `Capacitor` | `.pos`, `.neg` | `.positive`, `.negative` |
-| `Inductor` | `.n1`, `.n2` | `.a`, `.b` |
-
 ## Examples
 
-### RC Low-Pass Filter
-
+### RC Filter
 ```python
 from zest import Circuit, VoltageSource, Resistor, Capacitor
 
-circuit = Circuit("RC Filter")
+circuit = Circuit("RC Low-Pass Filter")
 
-# Create components
 vs = VoltageSource(voltage=5.0)
-r1 = Resistor(resistance=1000)      # 1kΩ series resistor
-c1 = Capacitor(capacitance=1e-6)    # 1µF filter capacitor
+r1 = Resistor(resistance=1000)      # 1kΩ
+c1 = Capacitor(capacitance=1e-6)    # 1µF
 
-# Wire the circuit
-circuit.wire(vs.neg, circuit.gnd)     # VS negative to ground
-circuit.wire(vs.pos, r1.n1)           # VS positive to R1 input
-circuit.wire(r1.n2, c1.pos)           # R1 output to C1 positive (filter output)
-circuit.wire(c1.neg, circuit.gnd)     # C1 negative to ground
+# Wire the RC filter
+circuit.wire(vs.pos, r1.n1)        # Input
+circuit.wire(r1.n2, c1.pos)        # RC junction (output)
+circuit.wire(vs.neg, circuit.gnd)   
+circuit.wire(c1.neg, circuit.gnd)
 
-# Calculate corner frequency
-import math
-corner_freq = 1 / (2 * math.pi * r1.resistance * c1.capacitance)
-print(f"Corner frequency: {corner_freq:.1f} Hz")
-
-print(circuit.compile_to_spice())
+# Calculate corner frequency: 159 Hz
+corner_freq = 1 / (2 * 3.14159 * 1000 * 1e-6)
+print(f"Corner frequency: {corner_freq:.0f} Hz")
 ```
 
-### Multi-Stage Filter
-
+### Simulation
 ```python
-circuit = Circuit("Multi-Stage Filter")
+# Run SPICE simulation (requires PySpice)
+results = circuit.simulate_operating_point()
 
-# Create components
-vin = VoltageSource(voltage=10.0)
-r1 = Resistor(resistance=1000)       # First stage
+# Get results using component instances, not strings
+r1_data = results.get_component_results(r1)
+print(f"R1 voltage: {r1_data['voltage_across']:.2f}V")
+print(f"R1 current: {r1_data['current']:.3f}A")
+```
+
+### Subcircuits
+```python
+# Create reusable RC block
+rc_block = Circuit("RC_Block")
+r = Resistor(resistance=1000)
+c = Capacitor(capacitance=1e-6)
+rc_block.wire(r.n2, c.pos)
+
+# Expose pins for external connections
+rc_block.add_pin("input", r.n1)
+rc_block.add_pin("output", r.n2)  
+rc_block.add_pin("gnd", c.neg)
+
+# Use as subcircuit
+main_circuit = Circuit("Multi-Stage Filter")
+stage1 = SubCircuit(definition=rc_block, name="Stage1")
+stage2 = SubCircuit(definition=rc_block, name="Stage2")
+
+# Connect stages
+main_circuit.wire(stage1.output, stage2.input)
+```
+
+## Why Zest?
+
+**Traditional Approach (Error-Prone):**
+```python
+# String-based node names - easy to make mistakes
+circuit.add_resistor("R1", "node1", "node2", 1000)
+circuit.add_capacitor("C1", "node2", "gnd", 1e-6)
+circuit.connect("node1", "input")  # Typo in node name!
+```
+
+**Zest Approach (Type-Safe):**
+```python
+# Terminal objects prevent typos and enable auto-completion
+r1 = Resistor(resistance=1000)
 c1 = Capacitor(capacitance=1e-6)
-r2 = Resistor(resistance=2000)       # Second stage  
-c2 = Capacitor(capacitance=2e-6)
-r_load = Resistor(resistance=10000)   # Load
-
-# Wire the multi-stage filter
-circuit.wire(vin.neg, circuit.gnd)              # Input source to ground
-circuit.wire(vin.pos, r1.n1)                    # Input to first stage
-circuit.wire(r1.n2, c1.pos)                     # First RC junction
-circuit.wire(c1.neg, circuit.gnd)               # First cap to ground
-circuit.wire(r1.n2, r2.n1)                      # Couple to second stage
-circuit.wire(r2.n2, c2.pos)                     # Second RC junction
-circuit.wire(c2.neg, circuit.gnd)               # Second cap to ground
-circuit.wire(r2.n2, r_load.n1)                  # Connect load
-circuit.wire(r_load.n2, circuit.gnd)            # Load to ground
-
-print(f"Circuit has {len(circuit.components)} components and {len(circuit.wires)} wires")
+circuit.wire(r1.n2, c1.pos)  # IDE auto-completion helps!
 ```
 
-## Simulation Integration
+## Terminal Reference
 
-Zest integrates seamlessly with PySpice for circuit simulation:
+| Component | Terminals |
+|-----------|-----------|
+| `VoltageSource` | `.pos`, `.neg` |
+| `Resistor` | `.n1`, `.n2` |
+| `Capacitor` | `.pos`, `.neg` |
+| `Inductor` | `.n1`, `.n2` |
 
-```python
-from zest.simulation import check_simulation_requirements
+## Requirements
 
-# Check if PySpice is available
-if check_simulation_requirements():
-    # Run DC operating point analysis
-    results = circuit.simulate_operating_point()
-    print("Node voltages:", results.node_voltages)
-    
-    # Run DC sweep
-    sweep_results = circuit.simulate_dc_sweep("V1", 0, 10, 0.1)
-    
-    # Run AC analysis
-    ac_results = circuit.simulate_ac(start_freq=1, stop_freq=1e6)
-    
-    # Run transient analysis  
-    tran_results = circuit.simulate_transient(step_time=1e-6, end_time=1e-3)
-else:
-    print("PySpice not available - only SPICE export supported")
-```
+- Python 3.7+
+- `matplotlib` - Visualization
+- `pyspice` - SPICE simulation
 
-## API Benefits
+## More Examples
 
-### Type Safety
-- Terminal objects prevent typos in node names
-- IDE auto-completion for all terminal references
-- Clear error messages for invalid connections
-
-### Explicit Topology  
-- Circuit structure is obvious from wire() calls
-- No hidden connections or implicit assumptions
-- Easy to reason about signal flow
-
-### Reusable Components
-- Components can be created once, used in multiple circuits
-- Clean separation between component parameters and connectivity
-- Easy to build component libraries
-
-### Graph Visualization
-- Natural fit for graph-based visualization tools
-- Components as nodes, wires as edges
-- Circuit topology is first-class data
-
-## Project Structure
-
-```
-zest/
-├── zest/                    # Main package
-│   ├── __init__.py         # Package exports
-│   ├── circuit.py          # Circuit class with wire() method
-│   ├── components.py       # Component classes with terminals
-│   ├── nodes.py           # Node and ground objects
-│   ├── simulation.py      # PySpice integration
-│   └── visualization.py   # Circuit plotting
-├── tests/
-│   ├── test_graph_api.py  # Graph API tests
-│   └── test_simulation.py # Simulation tests
-├── example_graph_api.py   # Complete examples
-├── demo_complete_workflow.py # Simulation demo
-└── README.md
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass: `python -m pytest tests/`
-5. Submit a pull request
-
-## License
-
-MIT License - see LICENSE file for details.
-
-## Related Projects
-
-- [PySpice](https://github.com/PySpice-org/PySpice) - Python wrapper for SPICE simulators
-- [SciPy](https://scipy.org/) - Scientific computing library
-- [NetworkX](https://networkx.org/) - Graph analysis tools
+See the `examples/` directory for complete working examples including:
+- Astable multivibrator with subcircuits
+- Cascaded filter analysis
+- Transient simulations with plotting
 
 ---
 
-**Zest** - Making circuit building a breeze! 🌪️⚡ 
+*Zest: Making circuit design as intuitive as connecting Lego blocks* 🔧 
