@@ -1,0 +1,26 @@
+* Circuit: Mixed_Subcircuit_Types_Test
+
+* ===== Model Includes ===== *
+.INCLUDE "/Users/marc/Code/zest/tests/models/custom_resistor.lib"
+
+* ===== Subcircuit Definitions ===== *
+.SUBCKT RC_FILTER_STAGE_CUSTOM vin vout gnd
+XR_custom vin vout CUSTOM_RESISTOR
+CC_internal vout gnd 1e-06
+.ENDS RC_FILTER_STAGE_CUSTOM
+
+.SUBCKT VOLTAGE_DIVIDER_CUSTOM vin vout gnd
+XR1_custom vin vout CUSTOM_RESISTOR
+XR2_custom vout gnd CUSTOM_RESISTOR
+.ENDS VOLTAGE_DIVIDER_CUSTOM
+
+* ===== Main Circuit Components ===== *
+V1 V1_pos gnd DC 5.0
+XX_RC_Filter V1_pos XX_RC_Filter_vout gnd RC_FILTER_STAGE_CUSTOM
+XX_Voltage_Divider XX_RC_Filter_vout XX_Voltage_Divider_vout gnd VOLTAGE_DIVIDER_CUSTOM
+
+* Initial Conditions
+.IC V(XX_RC_Filter_vout)=0.0
+.IC V(XX_Voltage_Divider_vout)=0.0
+
+.end

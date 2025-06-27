@@ -7,12 +7,14 @@ and golden file management for time-domain simulations.
 """
 
 import os
+import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 from typing import List, Tuple, Optional, Union
 import unittest
+from .unified_plotting_mixin import UnifiedPlottingMixin
 
 
 class WaveformTestFramework:
@@ -27,6 +29,9 @@ class WaveformTestFramework:
         # Create directories if they don't exist
         self.golden_dir.mkdir(exist_ok=True)
         self.plots_dir.mkdir(exist_ok=True)
+        
+        # Detect verbose mode for unified plotting behavior
+        self.verbose_mode = '-v' in sys.argv or '--verbose' in sys.argv
     
     def compare_waveform_against_file(self, golden_file: str, x_values: np.ndarray, 
                                     values: Union[np.ndarray, List[np.ndarray]], 
@@ -167,9 +172,9 @@ class WaveformTestFramework:
                       value_names: Tuple[str, ...] = ('V(output)',),
                       title: str = "Transient Analysis",
                       save_as: Optional[str] = None,
-                      show_plot: bool = True) -> None:
+                      show_plot: Optional[bool] = None) -> None:
         """
-        Plot transient analysis results.
+        Plot transient analysis results using unified plotting approach.
         
         Args:
             times: Time values
@@ -177,9 +182,9 @@ class WaveformTestFramework:
             value_names: Names for each trace
             title: Plot title
             save_as: Filename to save plot (optional)
-            show_plot: Whether to display the plot
+            show_plot: Whether to display the plot (None = auto-detect from verbose mode)
         """
-        plt.figure(figsize=(10, 6))
+        fig = plt.figure(figsize=(10, 6))
         
         for trace, name in zip(traces, value_names):
             plt.plot(times, trace, label=name, linewidth=2)
@@ -195,18 +200,22 @@ class WaveformTestFramework:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
             print(f"Plot saved to: {save_path}")
         
+        # Use unified plotting behavior
+        if show_plot is None:
+            show_plot = self.verbose_mode
+        
         if show_plot:
-            plt.show()
+            plt.show(block=True)
         else:
-            plt.close()
+            plt.close(fig)
     
     def plot_dc_sweep(self, v1: np.ndarray, traces: List[np.ndarray],
                      value_names: Tuple[str, ...] = ('V(output)',),
                      title: str = "DC Sweep Analysis",
                      save_as: Optional[str] = None,
-                     show_plot: bool = True) -> None:
+                     show_plot: Optional[bool] = None) -> None:
         """
-        Plot DC sweep analysis results.
+        Plot DC sweep analysis results using unified plotting approach.
         
         Args:
             v1: Sweep voltage values
@@ -214,9 +223,9 @@ class WaveformTestFramework:
             value_names: Names for each trace
             title: Plot title
             save_as: Filename to save plot (optional)
-            show_plot: Whether to display the plot
+            show_plot: Whether to display the plot (None = auto-detect from verbose mode)
         """
-        plt.figure(figsize=(10, 6))
+        fig = plt.figure(figsize=(10, 6))
         
         for trace, name in zip(traces, value_names):
             plt.plot(v1, trace, label=name, linewidth=2)
@@ -232,13 +241,17 @@ class WaveformTestFramework:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
             print(f"Plot saved to: {save_path}")
         
+        # Use unified plotting behavior
+        if show_plot is None:
+            show_plot = self.verbose_mode
+        
         if show_plot:
-            plt.show()
+            plt.show(block=True)
         else:
-            plt.close()
+            plt.close(fig)
 
 
-class WaveformTestMixin:
+class WaveformTestMixin(UnifiedPlottingMixin):
     """Mixin class to add waveform testing capabilities to test cases."""
     
     def setUp(self):
@@ -259,6 +272,6 @@ class WaveformTestMixin:
     def plot_and_save_transient(self, times: np.ndarray, traces: List[np.ndarray],
                                value_names: Tuple[str, ...] = ('V(output)',),
                                title: str = "Transient Analysis",
-                               filename: str = "transient_plot.png") -> None:
-        """Helper to plot and save transient results."""
-        self.waveform.plot_transient(times, traces, value_names, title, filename, show_plot=True) 
+                               filename: str = "transient_plot.png") -> str:
+        """Helper to plot and save transient results using unified plotting."""
+        return self.create_simple_plot(times, traces, value_names, title, filename) 

@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zest import Circuit, VoltageSource, Resistor, Capacitor
 from zest.simulation import check_simulation_requirements
-from waveform_test_framework import WaveformTestMixin
+from .waveform_test_framework import WaveformTestMixin
 
 
 class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):

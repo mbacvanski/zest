@@ -1,0 +1,26 @@
+* Circuit: Mixed_Cascaded_RC_Filter
+
+* ===== Model Includes ===== *
+.INCLUDE "/Users/marc/Code/zest/tests/models/custom_resistor.lib"
+
+* ===== Subcircuit Definitions ===== *
+.SUBCKT RC_FILTER_STAGE vin vout gnd
+RR_internal vin vout 10000.0
+CC_internal vout gnd 1e-06
+.ENDS RC_FILTER_STAGE
+
+.SUBCKT RC_FILTER_STAGE_CUSTOM vin vout gnd
+XR_custom vin vout CUSTOM_RESISTOR
+CC_internal vout gnd 1e-06
+.ENDS RC_FILTER_STAGE_CUSTOM
+
+* ===== Main Circuit Components ===== *
+V1 V1_pos gnd DC 1.0
+XX_Stage1_Normal V1_pos XX_Stage1_Normal_vout gnd RC_FILTER_STAGE
+XX_Stage2_Custom XX_Stage1_Normal_vout XX_Stage2_Custom_vout gnd RC_FILTER_STAGE_CUSTOM
+
+* Initial Conditions
+.IC V(XX_Stage1_Normal_vout)=0.0
+.IC V(XX_Stage2_Custom_vout)=0.0
+
+.end
