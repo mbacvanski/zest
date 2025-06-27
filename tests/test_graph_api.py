@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zest import Circuit, VoltageSource, Resistor, Capacitor, Inductor
+from golden_test_framework import GoldenTestMixin
 
 
 class TestGraphAPI(unittest.TestCase):
@@ -291,7 +292,7 @@ class TestGraphAPI(unittest.TestCase):
         self.assertIn("2 wires", repr_str)
 
 
-class TestGraphAPIWithGoldenFiles(unittest.TestCase):
+class TestGraphAPIWithGoldenFiles(GoldenTestMixin, unittest.TestCase):
     """Test graph API against golden files."""
     
     def test_voltage_divider_golden(self):
@@ -307,18 +308,8 @@ class TestGraphAPIWithGoldenFiles(unittest.TestCase):
         circuit.wire(r1.n2, r2.n1)
         circuit.wire(r2.n2, circuit.gnd)
         
-        spice_output = circuit.compile_to_spice()
-        
-        # Basic structure checks
-        lines = spice_output.strip().split('\n')
-        
-        # Should have header, 3 components, blank line, .end
-        self.assertGreaterEqual(len(lines), 6)
-        self.assertTrue(lines[0].startswith("*"))  # Comment
-        self.assertTrue(any("V1" in line for line in lines))
-        self.assertTrue(any("R1" in line for line in lines))
-        self.assertTrue(any("R2" in line for line in lines))
-        self.assertTrue(lines[-1] == ".end")
+        # Compare against golden file
+        self.assert_circuit_matches_golden(circuit, "voltage_divider.spice")
     
     def test_rc_filter_golden(self):
         """Test RC filter matches expected structure."""
@@ -333,15 +324,22 @@ class TestGraphAPIWithGoldenFiles(unittest.TestCase):
         circuit.wire(r1.n2, c1.pos)
         circuit.wire(c1.neg, circuit.gnd)
         
-        spice_output = circuit.compile_to_spice()
+        # Compare against golden file
+        self.assert_circuit_matches_golden(circuit, "rc_filter.spice")
+    
+    def test_simple_circuit_golden(self):
+        """Test simple circuit matches existing golden file."""
+        circuit = Circuit("Simple Circuit")
         
-        # Check for components
-        self.assertIn("V1", spice_output)
-        self.assertIn("R1", spice_output)
-        self.assertIn("C1", spice_output)
-        self.assertIn("5", spice_output)  # Voltage
-        self.assertIn("1000", spice_output)  # Resistance
-        self.assertIn("1e-06", spice_output)  # Capacitance
+        vs = VoltageSource(voltage=5.0)
+        r1 = Resistor(resistance=1000)
+        
+        circuit.wire(vs.pos, r1.n1)
+        circuit.wire(vs.neg, circuit.gnd)
+        circuit.wire(r1.n2, circuit.gnd)
+        
+        # This should match the existing simple_circuit.spice golden file
+        self.assert_circuit_matches_golden(circuit, "simple_circuit.spice")
 
 
 if __name__ == '__main__':

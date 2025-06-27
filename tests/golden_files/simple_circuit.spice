@@ -1,6 +1,6 @@
-.title SimpleCircuit
+* Circuit: Simple Circuit
 
-V1 in gnd DC 5.0
-R1 in out 1000.0
+V1 R1_n1 gnd DC 5.0
+R1 R1_n1 gnd 1000
 
 .end

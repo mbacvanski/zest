@@ -1,0 +1,7 @@
+* Circuit: Voltage Divider
+
+V1 R1_n1 gnd DC 12.0
+R1 R1_n1 R1_n2 1000
+R2 R1_n2 gnd 2000
+
+.end

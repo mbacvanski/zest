@@ -21,13 +21,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zest import Circuit, VoltageSource, Resistor, Capacitor, Inductor
 from zest.simulation import check_simulation_requirements, CircuitSimulator
+from golden_test_framework import GoldenTestMixin, GoldenTestFramework
 
 
-class TestPySpiceIntegration(unittest.TestCase):
+class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
     """Test full PySpice integration with actual SPICE simulation."""
     
     def setUp(self):
         """Set up for each test."""
+        super().setUp()  # Initialize GoldenTestMixin
         self.available, self.message = check_simulation_requirements()
         if not self.available:
             self.skipTest(f"PySpice not available: {self.message}")
@@ -240,13 +242,10 @@ class TestPySpiceIntegration(unittest.TestCase):
         # Generate SPICE netlist
         spice_netlist = circuit.compile_to_spice()
         
-        # Verify netlist contains expected elements
-        self.assertIn("V1", spice_netlist)
-        self.assertIn("R1", spice_netlist)
-        self.assertIn("R2", spice_netlist)
-        self.assertIn("1500", spice_netlist)
-        self.assertIn("3000", spice_netlist)
-        self.assertIn("15", spice_netlist)
+        # Compare exact SPICE output against golden file (deterministic generation)
+        golden = GoldenTestFramework(self)
+        golden.assert_matches_golden(spice_netlist, "netlist_test_15v_1500_3000.spice", 
+                                   self.update_golden_files)
         
         # Now simulate it and verify results
         results = circuit.simulate_operating_point()
@@ -309,17 +308,15 @@ class TestPySpiceIntegration(unittest.TestCase):
         print(f"Parallel resistor simulation successful: {len(circuit.components)} components")
 
 
-class TestCircuitValidation(unittest.TestCase):
+class TestCircuitValidation(GoldenTestMixin, unittest.TestCase):
     """Test circuit validation and error handling."""
     
     def test_empty_circuit_handling(self):
         """Test handling of empty circuits."""
         circuit = Circuit("Empty Circuit")
         
-        # Should be able to compile empty circuit
-        spice = circuit.compile_to_spice()
-        self.assertIn("Empty Circuit", spice)
-        self.assertIn(".end", spice)
+        # Compare exact SPICE output against golden file
+        self.assert_circuit_matches_golden(circuit, "empty_circuit.spice")
         
         # Simulation should handle empty circuit gracefully
         available, _ = check_simulation_requirements()
@@ -343,10 +340,8 @@ class TestCircuitValidation(unittest.TestCase):
         self.assertEqual(len(circuit.components), 2)
         self.assertEqual(len(circuit.wires), 0)
         
-        # Should still generate SPICE (though it won't simulate well)
-        spice = circuit.compile_to_spice()
-        self.assertIn("V1", spice)
-        self.assertIn("R1", spice)
+        # Compare exact SPICE output against golden file
+        self.assert_circuit_matches_golden(circuit, "disconnected_components.spice")
 
 
 if __name__ == '__main__':

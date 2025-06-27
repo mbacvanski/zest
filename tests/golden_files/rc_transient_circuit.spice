@@ -1,0 +1,30 @@
+RC Transient Circuit for Golden Testing
+*
+* Simple RC charging circuit:
+* - 5V step voltage source
+* - 1kΩ resistor  
+* - 1µF capacitor
+* - Time constant τ = RC = 1ms
+*
+* Circuit topology:
+* V1 -> R1 -> C1 -> GND
+*          |
+*          +-> Output node (cap_voltage)
+*
+
+.title RC Transient Analysis Circuit
+
+* Voltage source: 5V step input
+V1 vin 0 5.0
+
+* Components
+R1 vin cap_voltage 1k
+C1 cap_voltage 0 1u
+
+* Analysis commands
+.tran 5u 5m
+
+* Output
+.print tran V(cap_voltage) V(vin) I(V1) I(R1)
+
+.end 

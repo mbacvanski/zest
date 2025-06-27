@@ -140,7 +140,14 @@ class SimulatedCircuit:
     
     def _extract_value(self, node_value):
         """Extract numeric value from PySpice waveform or other objects."""
-        if hasattr(node_value, '__float__'):
+        # Handle PySpice WaveForm objects (transient/AC analysis)
+        if hasattr(node_value, 'shape') and hasattr(node_value, '__getitem__'):
+            # This is a PySpice WaveForm object - convert to numpy array
+            try:
+                return np.array([float(val) for val in node_value])
+            except:
+                return np.array(node_value)
+        elif hasattr(node_value, '__float__'):
             try:
                 return float(node_value)
             except:
@@ -150,7 +157,7 @@ class SimulatedCircuit:
                 else:
                     return 0.0
         elif hasattr(node_value, '__iter__') and not isinstance(node_value, str):
-            # For transient/AC analysis, might be arrays
+            # For other array-like objects
             try:
                 return np.array(node_value) if hasattr(np, 'array') else list(node_value)
             except:
@@ -209,6 +216,19 @@ class CircuitSimulator:
         # Add components from our circuit
         for component in self.circuit.components:
             self._add_component_to_pyspice(pyspice_circuit, component, add_current_probes)
+        
+        # Add initial conditions using raw SPICE directives
+        if self.circuit._initial_conditions:
+            # Group initial conditions by node
+            node_ics = {}
+            for terminal, voltage in self.circuit._initial_conditions.items():
+                node_name = self.circuit.get_spice_node_name(terminal)
+                if node_name != "gnd":  # Skip ground (always 0V)
+                    node_ics[node_name] = voltage
+            
+            # Add .IC directive for each node using raw_spice
+            for node_name, voltage in node_ics.items():
+                pyspice_circuit.raw_spice += f".IC V({node_name})={voltage}\n"
         
         return pyspice_circuit
     
@@ -317,9 +337,13 @@ class CircuitSimulator:
         simulator = pyspice_circuit.simulator(temperature=temperature, nominal_temperature=temperature)
         
         try:
+            # Use initial conditions if they exist
+            use_initial_condition = len(self.circuit._initial_conditions) > 0
+            
             analysis = simulator.transient(step_time=step_time@u_s, 
                                          end_time=end_time@u_s,
-                                         start_time=start_time@u_s)
+                                         start_time=start_time@u_s,
+                                         use_initial_condition=use_initial_condition)
             return SimulatedCircuit(self.circuit, "Transient Analysis", analysis)
         except Exception as e:
             raise RuntimeError(f"Transient analysis failed: {e}")

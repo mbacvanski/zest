@@ -1,0 +1,7 @@
+* Circuit: Netlist Test
+
+V1 R1_n1 gnd DC 15.0
+R1 R1_n1 R1_n2 1500
+R2 R1_n2 gnd 3000
+
+.end

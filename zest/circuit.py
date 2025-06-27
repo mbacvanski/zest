@@ -31,6 +31,7 @@ class Circuit:
         self.wires = []  # List of (terminal1, terminal2) wire connections
         self.gnd = gnd   # Circuit's ground reference
         self._component_names = {}  # Maps component -> final name
+        self._initial_conditions = {}  # Maps terminal -> initial voltage
         
         # Set this circuit as the current circuit for component auto-registration
         set_current_circuit(self)
@@ -77,6 +78,41 @@ class Circuit:
         # Only add if this exact wire doesn't already exist
         if wire not in self.wires and reverse_wire not in self.wires:
             self.wires.append(wire)
+    
+    def set_initial_condition(self, terminal, voltage):
+        """
+        Set the initial voltage of a node/terminal for transient analysis.
+        
+        Args:
+            terminal: Terminal object or gnd to set initial voltage for
+            voltage: Initial voltage value in volts
+        """
+        from .components import Terminal
+        
+        if terminal is gnd:
+            if voltage != 0.0:
+                raise ValueError("Ground terminal must have 0V initial condition")
+            return  # Ground is always 0V, no need to store
+        
+        if not isinstance(terminal, Terminal):
+            raise ValueError(f"terminal must be a Terminal or gnd, got {type(terminal)}")
+        
+        self._initial_conditions[terminal] = voltage
+    
+    def get_initial_condition(self, terminal):
+        """
+        Get the initial voltage for a terminal.
+        
+        Args:
+            terminal: Terminal object or gnd
+            
+        Returns:
+            float: Initial voltage, or None if not set
+        """
+        if terminal is gnd:
+            return 0.0
+        
+        return self._initial_conditions.get(terminal, None)
     
     def _assign_component_names(self):
         """Assign final names to components based on their types."""
@@ -174,6 +210,22 @@ class Circuit:
         # Add components
         for component in self.components:
             lines.append(component.to_spice(self))
+        
+        # Add initial conditions if any are set
+        if self._initial_conditions:
+            lines.append("")
+            lines.append("* Initial Conditions")
+            
+            # Group initial conditions by node
+            node_ics = {}
+            for terminal, voltage in self._initial_conditions.items():
+                node_name = self.get_spice_node_name(terminal)
+                if node_name != "gnd":  # Skip ground (always 0V)
+                    node_ics[node_name] = voltage
+            
+            # Add .IC directive for each node
+            for node_name, voltage in node_ics.items():
+                lines.append(f".IC V({node_name})={voltage}")
         
         lines.append("")
         lines.append(".end")

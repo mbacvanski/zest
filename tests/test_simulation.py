@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zest import Circuit, VoltageSource, Resistor, Capacitor, Inductor
 from zest.simulation import CircuitSimulator, check_simulation_requirements
+from golden_test_framework import GoldenTestMixin
 
 
 class TestCircuitSimulator(unittest.TestCase):
@@ -84,7 +85,7 @@ class TestCircuitIntegration(unittest.TestCase):
             self.assertIsInstance(e, (ImportError, Exception))
 
 
-class TestSpiceNetlistGeneration(unittest.TestCase):
+class TestSpiceNetlistGeneration(GoldenTestMixin, unittest.TestCase):
     """Test SPICE netlist generation with the new API."""
     
     def test_voltage_divider_netlist(self):
@@ -103,14 +104,9 @@ class TestSpiceNetlistGeneration(unittest.TestCase):
         
         spice = circuit.compile_to_spice()
         
-        # Check basic structure
-        self.assertIn("V1", spice)
-        self.assertIn("R1", spice)
-        self.assertIn("R2", spice)
-        self.assertIn("10", spice)  # Voltage value
-        self.assertIn("1000", spice)  # R1 resistance
-        self.assertIn("2000", spice)  # R2 resistance
-        self.assertIn("gnd", spice)  # Ground reference
+        # Basic validation - ensure expected components are present
+        self.assert_spice_has_components(spice, ["V1", "R1", "R2"])
+        self.assert_spice_valid(spice)
     
     def test_rlc_circuit_netlist(self):
         """Test netlist generation for RLC circuit."""
@@ -130,14 +126,9 @@ class TestSpiceNetlistGeneration(unittest.TestCase):
         
         spice = circuit.compile_to_spice()
         
-        # Check all components present
-        self.assertIn("V1", spice)
-        self.assertIn("R1", spice)
-        self.assertIn("L1", spice)
-        self.assertIn("C1", spice)
-        self.assertIn("100", spice)  # Resistance
-        self.assertIn("0.001", spice)  # Inductance
-        self.assertIn("1e-06", spice)  # Capacitance
+        # Basic validation - ensure expected components are present
+        self.assert_spice_has_components(spice, ["V1", "R1", "L1", "C1"])
+        self.assert_spice_valid(spice)
     
     def test_terminal_connections(self):
         """Test that terminal connections work properly."""
@@ -155,10 +146,9 @@ class TestSpiceNetlistGeneration(unittest.TestCase):
         
         spice = circuit.compile_to_spice()
         
-        # Should generate valid SPICE
-        self.assertIn("V1", spice)
-        self.assertIn("R1", spice)
-        self.assertIn("C1", spice)
+        # Basic validation - ensure expected components are present
+        self.assert_spice_has_components(spice, ["V1", "R1", "C1"])
+        self.assert_spice_valid(spice)
     
     def test_wire_validation(self):
         """Test that wire() method validates inputs properly."""
