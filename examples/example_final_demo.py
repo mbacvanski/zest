@@ -8,6 +8,12 @@ This demonstrates:
 3. Full PySpice integration with actual SPICE simulation ✅
 """
 
+import sys
+import os
+
+# Add parent directory for zest imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from zest import Circuit, VoltageSource, Resistor
 
 def main():

@@ -54,10 +54,6 @@ circuit.wire(vs.pos, r1.n1)        # Input
 circuit.wire(r1.n2, c1.pos)        # RC junction (output)
 circuit.wire(vs.neg, circuit.gnd)   
 circuit.wire(c1.neg, circuit.gnd)
-
-# Calculate corner frequency: 159 Hz
-corner_freq = 1 / (2 * 3.14159 * 1000 * 1e-6)
-print(f"Corner frequency: {corner_freq:.0f} Hz")
 ```
 
 ### Simulation
@@ -128,10 +124,21 @@ circuit.wire(r1.n2, c1.pos)  # IDE auto-completion helps!
 
 ## More Examples
 
-See the `examples/` directory for complete working examples including:
-- Astable multivibrator with subcircuits
-- Cascaded filter analysis
-- Transient simulations with plotting
+See the `examples/` directory for complete working examples:
+
+**Basic Examples:**
+- `example_final_demo.py` - Complete wire behavior and PySpice integration demo
+- `example_graph_api.py` - Pure graph-based circuit building 
+- `example_simulation.py` - Circuit simulation and analysis
+
+**Advanced Examples:**
+- `example_astable_multivibrator_comprehensive.py` - Oscillator with subcircuits and detailed analysis
+- `example_cascaded_filter.py` - Multi-stage filter design
+- `example_subcircuit.py` - Reusable circuit blocks
+
+**Specialized Examples:**
+- `demo_complete_workflow.py` - End-to-end circuit design workflow
+- `example_new_component.py` - Creating custom component types
 
 ---
 

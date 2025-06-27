@@ -18,7 +18,7 @@ import os
 import numpy as np
 
 # Add parent directory for local zest imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zest import Circuit, VoltageSource, Resistor, Capacitor, SubCircuit
 from zest.simulation import check_simulation_requirements
