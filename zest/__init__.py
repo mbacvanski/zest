@@ -8,12 +8,12 @@ and terminal-based connections for clean, readable circuit descriptions.
 from .circuit import Circuit
 from .components import Component, Terminal, VoltageSource, Resistor, Capacitor, Inductor
 from .nodes import Node, gnd
-from .simulation import CircuitSimulator, SimulationResults, check_simulation_requirements
+from .simulation import CircuitSimulator, SimulationResults, SimulatedCircuit, check_simulation_requirements
 
 __version__ = "0.1.0"
 __all__ = [
     "Circuit", 
     "Component", "Terminal", "VoltageSource", "Resistor", "Capacitor", "Inductor",
     "Node", "gnd",
-    "CircuitSimulator", "SimulationResults", "check_simulation_requirements"
+    "CircuitSimulator", "SimulationResults", "SimulatedCircuit", "check_simulation_requirements"
 ] 

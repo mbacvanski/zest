@@ -48,6 +48,52 @@ class Component:
         """Convert to SPICE netlist format using circuit's node mapping."""
         raise NotImplementedError("Subclasses must implement to_spice()")
     
+    def get_terminals(self):
+        """Get list of (terminal_name, terminal) tuples for this component."""
+        raise NotImplementedError("Subclasses must implement get_terminals()")
+    
+    def extract_simulation_results(self, simulated_circuit):
+        """
+        Extract simulation results specific to this component type.
+        
+        Args:
+            simulated_circuit: The SimulatedCircuit object containing simulation data
+            
+        Returns:
+            dict: Component-specific simulation results
+        """
+        # Base implementation provides common data for all components
+        results = {
+            'component': self,
+            'component_name': simulated_circuit.circuit.get_component_name(self),
+            'analysis_type': simulated_circuit.analysis_type
+        }
+        
+        # Get terminal voltages
+        terminal_voltages = {}
+        for terminal_name, terminal in self.get_terminals():
+            voltage_value = simulated_circuit._get_node_voltage_value(
+                simulated_circuit.circuit.get_spice_node_name(terminal)
+            )
+            terminal_voltages[terminal_name] = voltage_value
+        
+        results['terminal_voltages'] = terminal_voltages
+        
+        # Let subclasses add their specific results
+        self._add_derived_results(results, simulated_circuit)
+        
+        return results
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """
+        Add component-specific derived results. Override in subclasses.
+        
+        Args:
+            results: The results dictionary to add to
+            simulated_circuit: The SimulatedCircuit object
+        """
+        pass  # Base implementation does nothing
+    
     def __repr__(self):
         return f"{self.__class__.__name__}({self.name})"
 
@@ -70,11 +116,30 @@ class VoltageSource(Component):
     def get_component_type_prefix(self):
         return "V"
     
+    def get_terminals(self):
+        return [('pos', self.pos), ('neg', self.neg)]
+    
     def to_spice(self, circuit):
         """Convert to SPICE format using circuit's node mapping."""
         pos_node = circuit.get_spice_node_name(self.pos)
         neg_node = circuit.get_spice_node_name(self.neg)
         return f"{self.name} {pos_node} {neg_node} DC {self.voltage}"
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """Add voltage source specific results: current and voltage across."""
+        # Look for current through the voltage source
+        component_name = simulated_circuit.circuit.get_component_name(self)
+        source_current_key = f"v{component_name.lower()}"
+        current_value = simulated_circuit._get_branch_current_value(source_current_key)
+        if current_value is not None:
+            results['current'] = current_value
+        
+        # Calculate voltage across the source
+        terminal_voltages = results['terminal_voltages']
+        v_pos = terminal_voltages.get('pos', 0.0)
+        v_neg = terminal_voltages.get('neg', 0.0)
+        if isinstance(v_pos, (int, float)) and isinstance(v_neg, (int, float)):
+            results['voltage_across'] = v_pos - v_neg
 
 
 class Resistor(Component):
@@ -95,11 +160,28 @@ class Resistor(Component):
     def get_component_type_prefix(self):
         return "R"
     
+    def get_terminals(self):
+        return [('n1', self.n1), ('n2', self.n2)]
+    
     def to_spice(self, circuit):
         """Convert to SPICE format using circuit's node mapping."""
         n1_node = circuit.get_spice_node_name(self.n1)
         n2_node = circuit.get_spice_node_name(self.n2)
         return f"{self.name} {n1_node} {n2_node} {self.resistance}"
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """Add resistor specific results: voltage across, current, and power."""
+        terminal_voltages = results['terminal_voltages']
+        v_n1 = terminal_voltages.get('n1', 0.0)
+        v_n2 = terminal_voltages.get('n2', 0.0)
+        
+        if isinstance(v_n1, (int, float)) and isinstance(v_n2, (int, float)):
+            voltage_across = v_n1 - v_n2
+            results['voltage_across'] = voltage_across
+            # Calculate current using Ohm's law
+            results['current'] = voltage_across / self.resistance
+            # Calculate power dissipation
+            results['power'] = voltage_across**2 / self.resistance
 
 
 class Capacitor(Component):
@@ -120,11 +202,23 @@ class Capacitor(Component):
     def get_component_type_prefix(self):
         return "C"
     
+    def get_terminals(self):
+        return [('pos', self.pos), ('neg', self.neg)]
+    
     def to_spice(self, circuit):
         """Convert to SPICE format using circuit's node mapping."""
         pos_node = circuit.get_spice_node_name(self.pos)
         neg_node = circuit.get_spice_node_name(self.neg)
         return f"{self.name} {pos_node} {neg_node} {self.capacitance}"
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """Add capacitor specific results: voltage across."""
+        terminal_voltages = results['terminal_voltages']
+        v_pos = terminal_voltages.get('pos', 0.0)
+        v_neg = terminal_voltages.get('neg', 0.0)
+        
+        if isinstance(v_pos, (int, float)) and isinstance(v_neg, (int, float)):
+            results['voltage_across'] = v_pos - v_neg
 
 
 class Inductor(Component):
@@ -145,8 +239,20 @@ class Inductor(Component):
     def get_component_type_prefix(self):
         return "L"
     
+    def get_terminals(self):
+        return [('n1', self.n1), ('n2', self.n2)]
+    
     def to_spice(self, circuit):
         """Convert to SPICE format using circuit's node mapping."""
         n1_node = circuit.get_spice_node_name(self.n1)
         n2_node = circuit.get_spice_node_name(self.n2)
-        return f"{self.name} {n1_node} {n2_node} {self.inductance}" 
+        return f"{self.name} {n1_node} {n2_node} {self.inductance}"
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """Add inductor specific results: voltage across."""
+        terminal_voltages = results['terminal_voltages']
+        v_n1 = terminal_voltages.get('n1', 0.0)
+        v_n2 = terminal_voltages.get('n2', 0.0)
+        
+        if isinstance(v_n1, (int, float)) and isinstance(v_n2, (int, float)):
+            results['voltage_across'] = v_n1 - v_n2 
