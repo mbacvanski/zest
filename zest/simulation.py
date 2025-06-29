@@ -15,32 +15,6 @@ except ImportError:
     PYSPICE_AVAILABLE = False
 
 
-class SimulationResults:
-    """Container for simulation results."""
-    
-    def __init__(self, analysis_type, results=None):
-        self.analysis_type = analysis_type
-        self.results = results
-        self.nodes = {}
-        self.branches = {}
-        
-        if results is not None:
-            self._parse_results(results)
-    
-    def _parse_results(self, results):
-        """Parse PySpice results into more accessible format."""
-        if hasattr(results, 'nodes'):
-            for node_name, node_value in results.nodes.items():
-                self.nodes[str(node_name)] = float(node_value)
-        
-        if hasattr(results, 'branches'):
-            for branch_name, branch_value in results.branches.items():
-                self.branches[str(branch_name)] = float(branch_value)
-    
-    def __repr__(self):
-        return f"SimulationResults({self.analysis_type}, {len(self.nodes)} nodes, {len(self.branches)} branches)"
-
-
 class SimulatedCircuit:
     """
     A simulated circuit that can return component-specific simulation results.

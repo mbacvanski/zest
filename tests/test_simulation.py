@@ -87,7 +87,7 @@ class TestCircuitIntegration(unittest.TestCase):
         # For now, just check the method exists and doesn't crash
         try:
             result = self.circuit.simulate_operating_point()
-            # If it succeeds, result should be a SimulationResults object
+            # If it succeeds, result should be a SimulatedCircuit object
             self.assertIsNotNone(result)
         except Exception as e:
             # If PySpice not available or other issue, that's OK for this test

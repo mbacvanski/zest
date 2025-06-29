@@ -38,7 +38,7 @@ def main():
     
     print("Running DC operating point simulation...")
     try:
-        # Run simulation - now returns SimulatedCircuit instead of SimulationResults
+        # Run simulation - returns SimulatedCircuit
         simulated_circuit = circuit.simulate_operating_point()
         
         print(f"✅ Simulation successful!")
