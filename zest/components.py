@@ -72,9 +72,23 @@ class Component:
         """Convert to SPICE netlist format using circuit's node mapping."""
         raise NotImplementedError("Subclasses must implement to_spice()")
     
+    def to_spice_with_mapper(self, mapper):
+        """Convert to SPICE format using NodeMapper. Default implementation uses circuit interface."""
+        # For backwards compatibility, create a temporary circuit-like object
+        class CircuitMapper:
+            def get_spice_node_name(self, terminal):
+                return mapper.name_for(terminal)
+        
+        return self.to_spice(CircuitMapper())
+    
     def get_terminals(self):
         """Get list of (terminal_name, terminal) tuples for this component."""
         raise NotImplementedError("Subclasses must implement get_terminals()")
+    
+    def terminals(self):
+        """Get all terminals for this component as an iterable."""
+        for terminal_name, terminal in self.get_terminals():
+            yield terminal
     
     def extract_simulation_results(self, simulated_circuit):
         """
@@ -285,17 +299,33 @@ class Inductor(Component):
 class SubCircuit(Component):
     """
     Represents an instance of a subcircuit definition, behaving like a single component.
+    This is a backwards-compatibility wrapper around the new SubCircuitDef/SubCircuitInst system.
     """
     def __init__(self, definition, name=None):
-        from .circuit import Circuit
+        from .circuit import Circuit, SubCircuitDef
         super().__init__(name)
-        if not isinstance(definition, Circuit):
-            raise TypeError("Subcircuit definition must be a 'Circuit' object.")
-        if not definition.pins:
-            raise ValueError(f"The subcircuit definition '{definition.name}' has no external pins defined. "
+        
+        # Handle both old Circuit and new SubCircuitDef definitions
+        if isinstance(definition, SubCircuitDef):
+            self.definition = definition
+        elif isinstance(definition, Circuit):
+            # Wrap old Circuit in SubCircuitDef for compatibility
+            subckt_def = SubCircuitDef(definition.name)
+            # Copy all attributes from the circuit
+            subckt_def.components = definition.components[:]
+            subckt_def.wires = definition.wires[:]
+            subckt_def.pins = definition.pins.copy()
+            subckt_def._include_models = definition._include_models.copy()
+            subckt_def.includes = definition.includes[:]
+            subckt_def._initial_conditions = definition._initial_conditions.copy()
+            self.definition = subckt_def
+        else:
+            raise TypeError("Subcircuit definition must be a 'Circuit' or 'SubCircuitDef' object.")
+        
+        if not self.definition.pins:
+            raise ValueError(f"The subcircuit definition '{self.definition.name}' has no external pins defined. "
                              "Use the `add_pin()` method on the definition circuit.")
 
-        self.definition = definition
         self._terminals = {}
 
         # Dynamically create terminals on this instance based on the definition's pins.

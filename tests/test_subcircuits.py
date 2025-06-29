@@ -198,7 +198,7 @@ class TestSubcircuits(GoldenTestMixin, unittest.TestCase):
         with self.assertRaises(TypeError) as context:
             SubCircuit(definition="not a circuit")
         
-        self.assertIn("must be a 'Circuit' object", str(context.exception))
+        self.assertIn("must be a 'Circuit'", str(context.exception))
     
     def test_add_pin_validation(self):
         """Test validation in add_pin method."""
