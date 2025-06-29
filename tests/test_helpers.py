@@ -14,7 +14,7 @@ from zest import Circuit, SubCircuit, Component, Terminal
 
 class DummyComponent(Component):
     """A dummy component for external subcircuit pin definitions."""
-    def to_spice(self, circuit):
+    def to_spice(self, mapper, *, forced_name=None):
         return "* External component - defined in .INCLUDE file"
 
 def create_npn_definition() -> Circuit:

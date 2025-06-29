@@ -1,7 +1,7 @@
 * Circuit: RC Filter
 
-V1 R1_n1 gnd DC 5.0
-R1 R1_n1 C1_pos 1000
-C1 C1_pos gnd 1e-06
+V1 V1_pos gnd DC 5.0
+R1 V1_pos R1_n2 1000
+C1 R1_n2 gnd 1e-06
 
 .end

@@ -4,45 +4,62 @@ Circuit class for representing and manipulating electronic circuits as graphs.
 
 from .components import gnd
 from abc import ABC, abstractmethod
+from typing import Callable, Iterable, Mapping
 
 # No global circuit registry - components must be explicitly added to circuits
 
 
 class NodeMapper:
-    """Helper class for mapping terminals to SPICE node names."""
-    
-    def __init__(self, pin_overrides=None):
-        """
-        Initialize with optional pin name overrides.
-        
-        Args:
-            pin_overrides: dict mapping Terminal -> str for custom pin names
-        """
-        self.pin_overrides = pin_overrides or {}
-    
-    def name_for(self, terminal):
-        """
-        Get the SPICE node name for a terminal.
-        
-        Args:
-            terminal: Terminal object or gnd
-            
-        Returns:
-            str: SPICE node name
-        """
-        # Use override if available
-        if terminal in self.pin_overrides:
-            return self.pin_overrides[terminal]
-        
-        # Special case for ground
-        if terminal is gnd:
+    """
+    Pure helper that maps Terminal objects (and anything electrically connected
+    to them) to deterministic SPICE node names.
+    """
+
+    def __init__(
+        self,
+        connectivity_fn: Callable,
+        pin_aliases: Mapping = None,
+    ):
+        self._connected = connectivity_fn       # injected from NetlistBlock
+        self._pin_aliases = dict(pin_aliases or {})
+        self._cache = {}  # dict[Terminal, str] = {}
+        self._counter = 1                       # for auto N1, N2, …
+
+    def name_for(self, t):
+        """Get SPICE node name for terminal t."""
+        # Special case for ground - handle before other logic
+        if t is gnd:
             return "gnd"
         
-        # Otherwise, use the default logic
-        if hasattr(terminal, '__str__'):
-            return str(terminal).replace('.', '_')  # Replace dots for SPICE compatibility
+        # Check if this terminal is connected to ground
+        connected_terminals = self._connected(t)
+        if gnd in connected_terminals:
+            return "gnd"
+        
+        # 1. Check if this terminal (or any connected terminal) is an external pin
+        for pin_terminal, pin_name in self._pin_aliases.items():
+            if pin_terminal in connected_terminals:
+                return pin_name
+
+        # 2. if already assigned (by equivalence), reuse
+        for k, name in self._cache.items():
+            if t in self._connected(k):
+                return name
+
+        # 3. Generate a more descriptive name based on terminal's string representation
+        # Use the terminal's string form but make it SPICE-compatible
+        terminal_str = str(t)
+        if hasattr(t, 'component') and t.component is not None:
+            # For component terminals, use the terminal's string form
+            # This will be like "V1.pos" or "R1.n1", convert dots to underscores
+            spice_name = terminal_str.replace('.', '_')
         else:
-            return f"n{id(terminal) % 10000}"  # Fallback node name
+            # For standalone terminals, fallback to generic naming
+            spice_name = f"N{self._counter}"
+            self._counter += 1
+        
+        self._cache[t] = spice_name
+        return spice_name
 
 
 class NetlistBlock(ABC):
@@ -61,6 +78,7 @@ class NetlistBlock(ABC):
         self.pins = {}  # Maps pin name -> Terminal for subcircuit definitions
         self._include_models = set()  # Set of external SPICE model text to include
         self.includes = []  # List of external SPICE file dependencies
+        self._node_mapper = None  # Cached NodeMapper instance for backward compatibility
     
     def add_component(self, component):
         """Add a component to the circuit."""
@@ -201,9 +219,29 @@ class NetlistBlock(ABC):
             self._assign_component_names()
         return self._component_names[component]
     
+    def _assign_component_names_pure(self):
+        """
+        Assign names to components without mutating them.
+        Returns dict mapping component -> assigned name.
+        """
+        name_table = {}
+        type_counts = {}
+        
+        for component in self.components:
+            # Use requested name if provided, otherwise auto-generate
+            prefix = component.get_component_type_prefix()
+            if component._requested_name:
+                name_table[component] = f"{prefix}{component._requested_name}"
+            else:
+                type_counts[prefix] = type_counts.get(prefix, 0) + 1
+                name_table[component] = f"{prefix}{type_counts[prefix]}"
+        
+        return name_table
+    
     def get_spice_node_name(self, terminal):
         """
         Get the SPICE node name for a terminal based on the circuit's wiring.
+        This method is kept for backward compatibility and uses NodeMapper internally.
         
         Args:
             terminal: Terminal object or gnd
@@ -211,22 +249,10 @@ class NetlistBlock(ABC):
         Returns:
             str: SPICE node name
         """
-        if terminal is gnd:
-            return "gnd"
-        
-        # Find all terminals connected to this terminal through wires
-        connected_terminals = self._find_connected_terminals(terminal)
-        
-        # If any terminal in the connected set is connected to ground, use "gnd"
-        if gnd in connected_terminals:
-            return "gnd"
-        
-        # Otherwise, use the first terminal's name as the representative node name
-        representative = min(connected_terminals, key=lambda t: str(t) if hasattr(t, '__str__') else "")
-        if hasattr(representative, '__str__'):
-            return str(representative).replace('.', '_')  # Replace dots for SPICE compatibility
-        else:
-            return f"n{id(representative) % 10000}"  # Fallback node name
+        # Create a cached NodeMapper for consistency across calls
+        if self._node_mapper is None:
+            self._node_mapper = NodeMapper(self._find_connected_terminals)
+        return self._node_mapper.name_for(terminal)
     
     def _find_connected_terminals(self, start_terminal):
         """
@@ -266,52 +292,41 @@ class NetlistBlock(ABC):
     
     def _compile_as_subcircuit(self):
         """Legacy method for backwards compatibility with old SubCircuit system."""
-        # This compilation must happen in a 'sandboxed' way. Node names inside the
-        # subcircuit should be relative to its pins, not the parent circuit's wiring.
-        self._assign_component_names()
-        
-        # Update component names to match our assignments
-        for component in self.components:
-            component.name = self.get_component_name(component)
-
+        # Implement the subcircuit compilation logic for CircuitRoot
+        # A. deterministic pin order
         pin_order = list(self.pins.keys())
-        header = f".SUBCKT {self.name} {' '.join(pin_order)}"
 
-        body_lines = []
+        # B. assign component names without side-effects
+        name_table = self._assign_component_names_pure()
         
-        # Store reference to the original method before any overrides
-        original_get_node_method = self.get_spice_node_name
-        
-        for component in self.components:
-            # IMPORTANT: For node name resolution, we need a mapping from internal terminals
-            # to the public pin names.
+        # C. Temporarily set component names for NodeMapper to work correctly
+        original_names = {}
+        for comp, assigned_name in name_table.items():
+            original_names[comp] = comp.name
+            comp.name = assigned_name
 
-            # Create a temporary mapping for this subcircuit's compilation.
-            def get_subcircuit_node_name(terminal):
-                # Check if this terminal (or any terminal it's connected to) is an exposed pin.
-                for pin_name, pin_terminal in self.pins.items():
-                    # The `_find_connected_terminals` method correctly finds all electrically
-                    # common points within this circuit's context.
-                    if pin_terminal in self._find_connected_terminals(terminal):
-                        return pin_name
+        try:
+            # D. create mapper with pin aliases
+            mapper = NodeMapper(
+                connectivity_fn=self._find_connected_terminals,
+                pin_aliases={term: pin for pin, term in self.pins.items()},
+            )
 
-                # If not a pin, it's an internal node. Use the standard naming scheme,
-                # but ensure it's unique within the context of this subcircuit.
-                # Call the original method directly to avoid recursion.
-                return original_get_node_method(terminal)
+            # E. emit body
+            body_lines = []
+            for comp in self.components:
+                body_lines.append(
+                    comp.to_spice(mapper, forced_name=name_table[comp])
+                )
+        finally:
+            # F. restore original component names (pure function requirement)
+            for comp, original_name in original_names.items():
+                comp.name = original_name
 
-            # Temporarily override the get_spice_node_name method for this component's to_spice call
-            self.get_spice_node_name = get_subcircuit_node_name
-
-            try:
-                body_lines.append(component.to_spice(self))
-            finally:
-                # Restore the original method
-                self.get_spice_node_name = original_get_node_method
-
+        # G. wrap
+        header = f".SUBCKT {self.name} " + " ".join(pin_order)
         footer = f".ENDS {self.name}"
-
-        return "\n".join([header] + body_lines + [footer])
+        return "\n".join([header, *body_lines, footer])
 
     @abstractmethod
     def compile(self, mapper=None):
@@ -369,10 +384,13 @@ class CircuitRoot(NetlistBlock):
                         scanned_definitions[definition.name] = definition
                         circuits_to_scan.append(definition) # Scan for nested subcircuits
 
-        # 2. Assign component names for the entire circuit.
-        self._assign_component_names()
-        for component in self.components:
-            component.name = self.get_component_name(component)
+        # 2. Create mapper and assign component names for the entire circuit.
+        mapper = NodeMapper(self._find_connected_terminals)
+        name_table = self._assign_component_names_pure()
+        
+        # For backward compatibility, also update component.name attributes
+        for component, assigned_name in name_table.items():
+            component.name = assigned_name
 
         # 3. Build the netlist string.
         lines = [f"* Circuit: {self.name}", ""]
@@ -422,7 +440,7 @@ class CircuitRoot(NetlistBlock):
 
         # 6. Write the main circuit component and instance lines.
         for component in self.components:
-            lines.append(component.to_spice(self))
+            lines.append(component.to_spice(mapper, forced_name=name_table[component]))
 
         # 7. Add initial conditions if any.
         if self._initial_conditions:
@@ -430,8 +448,8 @@ class CircuitRoot(NetlistBlock):
             lines.append("* Initial Conditions")
             node_ics = {}
             for terminal, voltage in self._initial_conditions.items():
-                node_name = self.get_spice_node_name(terminal)
-                if node_name != "gnd":
+                node_name = mapper.name_for(terminal)
+                if node_name != "gnd":  # Use "gnd" instead of "0" for ground
                     node_ics[node_name] = voltage
             for node_name, voltage in node_ics.items():
                 lines.append(f".IC V({node_name})={voltage}")
@@ -505,44 +523,49 @@ class SubCircuitDef(NetlistBlock):
     def compile_as_subckt(self, mapper=None):
         """
         Compile this subcircuit into a .SUBCKT block.
+        Pure function: return a `.SUBCKT / .ENDS` string.
+        Must NOT mutate self or child components.
         
         Args:
-            mapper: NodeMapper instance for pin naming overrides
+            mapper: NodeMapper instance for pin naming overrides (unused for now)
             
         Returns:
             str: .SUBCKT definition
         """
-        # Create pin name overrides for the mapper
-        pin_overrides = {}
-        if mapper:
-            pin_overrides.update(mapper.pin_overrides)
-        
-        # Add our pins to the overrides
-        for pin_name, pin_terminal in self.pins.items():
-            # Find all terminals connected to this pin
-            connected_terminals = self._find_connected_terminals(pin_terminal)
-            for terminal in connected_terminals:
-                pin_overrides[terminal] = pin_name
-        
-        # Create mapper with pin overrides
-        subckt_mapper = NodeMapper(pin_overrides)
-        
-        # Assign component names
-        self._assign_component_names()
-        for component in self.components:
-            component.name = self.get_component_name(component)
-        
-        # Build the .SUBCKT definition
+        # A. deterministic pin order
         pin_order = list(self.pins.keys())
-        header = f".SUBCKT {self.name} {' '.join(pin_order)}"
+
+        # B. assign component names without side-effects
+        name_table = self._assign_component_names_pure()
         
-        body_lines = []
-        for component in self.components:
-            body_lines.append(component.to_spice_with_mapper(subckt_mapper))
-        
+        # C. Temporarily set component names for NodeMapper to work correctly
+        original_names = {}
+        for comp, assigned_name in name_table.items():
+            original_names[comp] = comp.name
+            comp.name = assigned_name
+
+        try:
+            # D. create mapper with pin aliases
+            mapper = NodeMapper(
+                connectivity_fn=self._find_connected_terminals,
+                pin_aliases={term: pin for pin, term in self.pins.items()},
+            )
+
+            # E. emit body
+            body_lines = []
+            for comp in self.components:
+                body_lines.append(
+                    comp.to_spice(mapper, forced_name=name_table[comp])
+                )
+        finally:
+            # F. restore original component names (pure function requirement)
+            for comp, original_name in original_names.items():
+                comp.name = original_name
+
+        # G. wrap
+        header = f".SUBCKT {self.name} " + " ".join(pin_order)
         footer = f".ENDS {self.name}"
-        
-        return "\n".join([header] + body_lines + [footer])
+        return "\n".join([header, *body_lines, footer])
 
 
 class SubCircuitInst:
@@ -577,24 +600,25 @@ class SubCircuitInst:
         """Get list of (terminal_name, terminal) tuples."""
         return list(self.terminals.items())
     
-    def to_spice(self, circuit):
+    def to_spice(self, mapper, *, forced_name=None):
         """Generate SPICE line for this subcircuit instance."""
-        # Get node names in parent circuit context
-        pin_order = list(self.definition.pins.keys())
-        node_names = [
-            circuit.get_spice_node_name(self.terminals[pin_name])
-            for pin_name in pin_order
-        ]
-        return f"{self.name} {' '.join(node_names)} {self.definition.name}"
-    
-    def to_spice_with_mapper(self, mapper):
-        """Generate SPICE line using NodeMapper."""
-        pin_order = list(self.definition.pins.keys())
-        node_names = [
-            mapper.name_for(self.terminals[pin_name])
-            for pin_name in pin_order
-        ]
-        return f"{self.name} {' '.join(node_names)} {self.definition.name}"
+        # Handle backward compatibility: if mapper is actually a circuit, adapt it
+        if hasattr(mapper, 'get_spice_node_name'):
+            # Old interface: mapper is actually a circuit
+            circuit = mapper
+            pin_order = list(self.definition.pins.keys())
+            node_names = [
+                circuit.get_spice_node_name(self.terminals[pin_name])
+                for pin_name in pin_order
+            ]
+        else:
+            # New interface: mapper is a NodeMapper
+            pin_order = list(self.definition.pins.keys())
+            node_names = [
+                mapper.name_for(self.terminals[pin_name])
+                for pin_name in pin_order
+            ]
+        return f"{forced_name or self.name} {' '.join(node_names)} {self.definition.name}"
     
     def extract_simulation_results(self, simulated_circuit):
         """Extract simulation results for this subcircuit instance."""

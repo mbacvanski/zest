@@ -68,18 +68,9 @@ class Component:
         # This will be overridden by subclasses
         return "X"
     
-    def to_spice(self, circuit):
-        """Convert to SPICE netlist format using circuit's node mapping."""
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE netlist format using NodeMapper."""
         raise NotImplementedError("Subclasses must implement to_spice()")
-    
-    def to_spice_with_mapper(self, mapper):
-        """Convert to SPICE format using NodeMapper. Default implementation uses circuit interface."""
-        # For backwards compatibility, create a temporary circuit-like object
-        class CircuitMapper:
-            def get_spice_node_name(self, terminal):
-                return mapper.name_for(terminal)
-        
-        return self.to_spice(CircuitMapper())
     
     def get_terminals(self):
         """Get list of (terminal_name, terminal) tuples for this component."""
@@ -157,11 +148,11 @@ class VoltageSource(Component):
     def get_terminals(self):
         return [('pos', self.pos), ('neg', self.neg)]
     
-    def to_spice(self, circuit):
-        """Convert to SPICE format using circuit's node mapping."""
-        pos_node = circuit.get_spice_node_name(self.pos)
-        neg_node = circuit.get_spice_node_name(self.neg)
-        return f"{self.name} {pos_node} {neg_node} DC {self.voltage}"
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE format using NodeMapper."""
+        pos_node = mapper.name_for(self.pos)
+        neg_node = mapper.name_for(self.neg)
+        return f"{forced_name or self.name} {pos_node} {neg_node} DC {self.voltage}"
     
     def _add_derived_results(self, results, simulated_circuit):
         """Add voltage source specific results: current and voltage across."""
@@ -201,11 +192,11 @@ class Resistor(Component):
     def get_terminals(self):
         return [('n1', self.n1), ('n2', self.n2)]
     
-    def to_spice(self, circuit):
-        """Convert to SPICE format using circuit's node mapping."""
-        n1_node = circuit.get_spice_node_name(self.n1)
-        n2_node = circuit.get_spice_node_name(self.n2)
-        return f"{self.name} {n1_node} {n2_node} {self.resistance}"
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE format using NodeMapper."""
+        n1_node = mapper.name_for(self.n1)
+        n2_node = mapper.name_for(self.n2)
+        return f"{forced_name or self.name} {n1_node} {n2_node} {self.resistance}"
     
     def _add_derived_results(self, results, simulated_circuit):
         """Add resistor specific results: voltage across, current, and power."""
@@ -243,11 +234,11 @@ class Capacitor(Component):
     def get_terminals(self):
         return [('pos', self.pos), ('neg', self.neg)]
     
-    def to_spice(self, circuit):
-        """Convert to SPICE format using circuit's node mapping."""
-        pos_node = circuit.get_spice_node_name(self.pos)
-        neg_node = circuit.get_spice_node_name(self.neg)
-        return f"{self.name} {pos_node} {neg_node} {self.capacitance}"
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE format using NodeMapper."""
+        pos_node = mapper.name_for(self.pos)
+        neg_node = mapper.name_for(self.neg)
+        return f"{forced_name or self.name} {pos_node} {neg_node} {self.capacitance}"
     
     def _add_derived_results(self, results, simulated_circuit):
         """Add capacitor specific results: voltage across."""
@@ -280,11 +271,11 @@ class Inductor(Component):
     def get_terminals(self):
         return [('n1', self.n1), ('n2', self.n2)]
     
-    def to_spice(self, circuit):
-        """Convert to SPICE format using circuit's node mapping."""
-        n1_node = circuit.get_spice_node_name(self.n1)
-        n2_node = circuit.get_spice_node_name(self.n2)
-        return f"{self.name} {n1_node} {n2_node} {self.inductance}"
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE format using NodeMapper."""
+        n1_node = mapper.name_for(self.n1)
+        n2_node = mapper.name_for(self.n2)
+        return f"{forced_name or self.name} {n1_node} {n2_node} {self.inductance}"
     
     def _add_derived_results(self, results, simulated_circuit):
         """Add inductor specific results: voltage across."""
@@ -340,13 +331,23 @@ class SubCircuit(Component):
     def get_terminals(self):
         return list(self._terminals.items())
 
-    def to_spice(self, circuit):
+    def to_spice(self, mapper, *, forced_name=None):
         """Generates the SPICE 'X' line for this subcircuit instance."""
-        # The node names are resolved in the context of the PARENT circuit.
-        pin_order = self.definition.pins.keys()
-        node_names_in_parent = [
-            circuit.get_spice_node_name(getattr(self, pin_name))
-            for pin_name in pin_order
-        ]
+        # Handle backward compatibility: if mapper is actually a circuit, adapt it
+        if hasattr(mapper, 'get_spice_node_name'):
+            # Old interface: mapper is actually a circuit
+            circuit = mapper
+            pin_order = self.definition.pins.keys()
+            node_names_in_parent = [
+                circuit.get_spice_node_name(getattr(self, pin_name))
+                for pin_name in pin_order
+            ]
+        else:
+            # New interface: mapper is a NodeMapper
+            pin_order = self.definition.pins.keys()
+            node_names_in_parent = [
+                mapper.name_for(getattr(self, pin_name))
+                for pin_name in pin_order
+            ]
 
-        return f"{self.name} {' '.join(node_names_in_parent)} {self.definition.name}" 
+        return f"{forced_name or self.name} {' '.join(node_names_in_parent)} {self.definition.name}" 
