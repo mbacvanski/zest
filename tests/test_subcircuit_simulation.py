@@ -180,29 +180,20 @@ class TestSubcircuitSimulation(WaveformTestMixin, unittest.TestCase):
         else:
             print("Note: Limited oscillation cycles detected - may be starting transient or very slow oscillation")
 
-        # Generate plots for visual inspection
-        print(f"\n📊 Generating astable multivibrator waveform plots...")
+        # Verification C: Golden Waveform Comparison with integrated plotting
+        # Note: First run will create the golden file
+        print(f"\n📊 Validating astable multivibrator waveform with integrated plotting...")
         
         # Convert time to milliseconds for better readability
         times_ms = times * 1000
         
-        # Create plot using the WaveformTestMixin functionality
-        self.plot_and_save_transient(
-            times_ms,
-            [q1_collector_v, q2_collector_v],
-            value_names=('Q1 Collector', 'Q2 Collector'),
-            title="Astable Multivibrator Oscillation",
-            filename="astable_multivibrator_demo.png"
-        )
-
-        # Verification C: Golden Waveform Comparison
-        # Note: First run will create the golden file
         try:
             self.assert_waveform_matches_golden(
                 "astable_multivibrator.csv",
-                times,
+                times_ms,
                 [q1_collector_v, q2_collector_v],
-                ['V(Q1_collector)', 'V(Q2_collector)']
+                ['V(Q1_collector)', 'V(Q2_collector)'],
+                plot_title="Astable Multivibrator Oscillation"
             )
         except Exception as e:
             print(f"Golden waveform comparison: {e}")

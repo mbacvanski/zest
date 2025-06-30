@@ -133,28 +133,18 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         self.assertGreater(final_cap_voltage, 0.9 * vs.voltage)  # Should reach at least 90% of input
         self.assertLess(initial_cap_voltage, 0.1 * vs.voltage)   # Should start near 0V
         
-        # Plot the REAL simulation results
-        print("\n📊 Generating plots from REAL PySpice data...")
+        # Compare against golden waveform using REAL data (with integrated plotting)
+        print("\n📋 Validating against golden waveform with integrated plotting...")
         
         traces = [cap_voltage_data, resistor_voltage_data]
         trace_names = ('V(capacitor)', 'V(resistor)')
-        
-        self.plot_and_save_transient(
-            times, traces, trace_names,
-            title="RC Circuit Charging Transient - PySpice Simulation (R=1kΩ, C=1µF, τ=1ms)",
-            filename="rc_charging_pyspice.png"
-        )
-        
-        print("✓ Plot displayed and saved")
-        
-        # Compare against golden waveform using REAL data
-        print("\n📋 Validating against golden waveform...")
         
         self.assert_waveform_matches_golden(
             "rc_charging_pyspice_1k_1uF.csv",
             times,
             traces,
-            trace_names
+            trace_names,
+            plot_title="RC Circuit Charging Transient - PySpice Simulation (R=1kΩ, C=1µF, τ=1ms)"
         )
         
         print("✓ Waveform validation completed")
@@ -208,13 +198,6 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         print(f"Initial voltage: {cap_voltage_data[0]:.3f}V")
         print(f"Final voltage: {cap_voltage_data[-1]:.3f}V")
         
-        # Plot and save results
-        self.plot_and_save_transient(
-            times, [cap_voltage_data], ("V(capacitor)",),
-            title="RC Discharging Transient (τ=1ms)",
-            filename="rc_discharging_transient.png"
-        )
-
         # Verify exponential decay: V(t) = V0 * exp(-t/τ)
         initial_voltage = cap_voltage_data[0]
         final_voltage = cap_voltage_data[-1]
@@ -232,13 +215,13 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         self.assertAlmostEqual(voltage_1tau, expected_1tau, delta=0.5, 
                              msg="Voltage at 1τ should be ~37% of initial")
         
-        
-        # Validate against golden file
+        # Validate against golden file (with integrated plotting)
         self.assert_waveform_matches_golden(
             "rc_discharging_2k_0p5uF.csv",
             times,
             [cap_voltage_data],
-            ("V(capacitor)",)
+            ("V(capacitor)",),
+            plot_title="RC Discharging Transient (τ=1ms)"
         )
         
         print("✓ RC discharging transient analysis completed successfully!")
@@ -320,21 +303,15 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         if len(traces) == 0:
             self.fail("No valid simulation results obtained")
         
-        print(f"\n📊 Plotting {len(traces)} real PySpice simulation results...")
+        print(f"\n📊 Validating {len(traces)} real PySpice simulation results with integrated plotting...")
         
-        # Plot comparison of real simulation results
-        self.plot_and_save_transient(
-            common_times, traces, tuple(trace_names),
-            title="RC Charging: Different Time Constants - PySpice Simulations",
-            filename="rc_time_constants_pyspice_comparison.png"
-        )
-        
-        # Validate against golden file
+        # Validate against golden file (with integrated plotting)
         self.assert_waveform_matches_golden(
             "rc_time_constants_pyspice_comparison.csv",
             common_times,
             traces,
-            tuple(trace_names)
+            tuple(trace_names),
+            plot_title="RC Charging: Different Time Constants - PySpice Simulations"
         )
         
         print("✓ Time constants comparison completed with real PySpice data")
