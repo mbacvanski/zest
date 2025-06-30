@@ -1,5 +1,5 @@
 """
-Simulation capabilities for Zest circuits using PySpice.
+Simulation capabilities for Zest circuits using spicelib/NGspice.
 """
 
 import numpy as np
@@ -7,14 +7,7 @@ from pathlib import Path
 import tempfile
 from abc import ABC, abstractmethod
 
-try:
-    import PySpice.Logging.Logging as Logging
-    from PySpice.Spice.Netlist import Circuit as PySpiceCircuit
-    from PySpice.Spice.NgSpice.Shared import NgSpiceShared
-    from PySpice.Unit import *
-    PYSPICE_AVAILABLE = True
-except ImportError:
-    PYSPICE_AVAILABLE = False
+# PySpice imports removed - now using SpicelibBackend exclusively
 
 
 class SimulatorBackend(ABC):
@@ -39,146 +32,6 @@ class SimulatorBackend(ABC):
         """
         pass
 
-
-class PySpiceBackend(SimulatorBackend):
-    """
-    PySpice-based simulation backend.
-    
-    This backend uses PySpice's SpiceParser to parse SPICE netlists
-    and run simulations.
-    """
-    
-    def __init__(self):
-        if not PYSPICE_AVAILABLE:
-            raise ImportError("PySpice is required for PySpiceBackend")
-        self._setup_logging()
-    
-    def _setup_logging(self):
-        """Setup PySpice logging."""
-        try:
-            logger = Logging.setup_logging()
-        except:
-            pass  # Logging setup might fail, but simulation can still work
-    
-    def run(self, netlist: str, analyses: list[str], **kwargs):
-        """
-        Run simulation analyses using PySpice.
-        
-        Args:
-            netlist: Complete SPICE netlist string
-            analyses: List of analysis types
-            **kwargs: Additional simulation parameters like temperature, etc.
-            
-        Returns:
-            SimulatedCircuit: Simulation results
-        """
-        # Parse the netlist using PySpice's SpiceParser
-        # This properly parses SPICE netlists and creates a circuit that can access node voltages
-        try:
-            import tempfile
-            import os
-            from PySpice.Spice.Parser import SpiceParser
-            
-            # Create a temporary file with the netlist
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.cir', delete=False) as f:
-                f.write(netlist)
-                netlist_path = f.name
-            
-            try:
-                # Use SpiceParser instead of direct Circuit file loading
-                parser = SpiceParser(path=str(netlist_path))
-                pyspice_circuit = parser.build_circuit()
-            finally:
-                # Clean up the temporary file
-                if os.path.exists(netlist_path):
-                    os.unlink(netlist_path)
-            
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse SPICE netlist: {e}")
-        
-        # Get simulation parameters
-        temperature = kwargs.get('temperature', 25)
-        
-        # Create simulator
-        simulator = pyspice_circuit.simulator(
-            temperature=temperature, 
-            nominal_temperature=temperature
-        )
-        
-        # Run requested analyses
-        analysis_result = None
-        analysis_type = "Unknown"
-        
-        try:
-            for analysis in analyses:
-                if analysis == "op":
-                    analysis_result = simulator.operating_point()
-                    analysis_type = "DC Operating Point"
-                    
-                elif analysis == "dc":
-                    # DC sweep requires additional parameters
-                    source_name = kwargs.get('source_name')
-                    start = kwargs.get('start')
-                    stop = kwargs.get('stop')
-                    step = kwargs.get('step')
-                    
-                    if not all([source_name, start is not None, stop is not None, step is not None]):
-                        raise ValueError("DC sweep requires source_name, start, stop, and step parameters")
-                    
-                    sweep_kwargs = {source_name: slice(start, stop, step)}
-                    analysis_result = simulator.dc(**sweep_kwargs)
-                    analysis_type = "DC Sweep"
-                    
-                elif analysis == "ac":
-                    # AC analysis parameters
-                    start_freq = kwargs.get('start_freq', 1)
-                    stop_freq = kwargs.get('stop_freq', 1e6)
-                    points_per_decade = kwargs.get('points_per_decade', 10)
-                    
-                    analysis_result = simulator.ac(
-                        start_frequency=start_freq@u_Hz,
-                        stop_frequency=stop_freq@u_Hz,
-                        number_of_points=points_per_decade,
-                        variation='dec'
-                    )
-                    analysis_type = "AC Analysis"
-                    
-                elif analysis == "transient":
-                    # Transient analysis parameters
-                    step_time = kwargs.get('step_time')
-                    end_time = kwargs.get('end_time')
-                    start_time = kwargs.get('start_time', 0)
-                    
-                    if step_time is None or end_time is None:
-                        raise ValueError("Transient analysis requires step_time and end_time parameters")
-                    
-                    # Check if initial conditions are present in the circuit
-                    circuit = kwargs.get('circuit')
-                    use_initial_condition = (circuit is not None and 
-                                           hasattr(circuit, '_initial_conditions') and 
-                                           len(circuit._initial_conditions) > 0)
-                    
-                    analysis_result = simulator.transient(
-                        step_time=step_time@u_s,
-                        end_time=end_time@u_s,
-                        start_time=start_time@u_s,
-                        use_initial_condition=use_initial_condition
-                    )
-                    analysis_type = "Transient Analysis"
-                    
-                else:
-                    raise ValueError(f"Unsupported analysis type: {analysis}")
-                    
-        except Exception as e:
-            raise RuntimeError(f"Simulation failed: {e}")
-        
-        # We need a reference to the original circuit for node mapping
-        # This is a bit of a hack for backward compatibility
-        circuit = kwargs.get('circuit')
-        if circuit is None:
-            raise ValueError("Circuit reference is required for result extraction")
-        
-        return SimulatedCircuit(circuit, analysis_type, analysis_result)
 
 
 class SpicelibBackend(SimulatorBackend):
@@ -679,16 +532,19 @@ class SimulatedCircuit:
         if self.analysis_type != "Transient Analysis":
             return None
         
-        if self.pyspice_results is None:
-            return None
+        # For spicelib backend, time is stored directly
+        if hasattr(self, 'time') and self.time is not None:
+            return self.time
         
-        # Try to extract time vector from PySpice results
-        if hasattr(self.pyspice_results, 'time'):
-            return self._extract_value(self.pyspice_results.time)
-        elif hasattr(self.pyspice_results, 'abscissa'):
-            return self._extract_value(self.pyspice_results.abscissa)
-        else:
-            return None
+        # Legacy PySpice support (for backward compatibility)
+        if hasattr(self, 'pyspice_results') and self.pyspice_results is not None:
+            # Try to extract time vector from PySpice results
+            if hasattr(self.pyspice_results, 'time'):
+                return self._extract_value(self.pyspice_results.time)
+            elif hasattr(self.pyspice_results, 'abscissa'):
+                return self._extract_value(self.pyspice_results.abscissa)
+        
+        return None
 
 
 class CircuitSimulator:
@@ -749,8 +605,11 @@ class CircuitSimulator:
 
 def check_simulation_requirements():
     """Check if simulation requirements are available."""
-    if not PYSPICE_AVAILABLE:
-        return False, "PySpice is not installed. Install with: pip install PySpice"
+    try:
+        from spicelib import SimRunner
+        from spicelib.simulators.ngspice_simulator import NGspiceSimulator
+        return True, "Simulation requirements satisfied (spicelib available)"
+    except ImportError:
+        return False, "spicelib is not installed. Install with: pip install spicelib"
     
-    # Could add more checks here (ngspice installation, etc.)
-    return True, "Simulation requirements satisfied" 
+    # Could add more checks here (ngspice installation, etc.) 

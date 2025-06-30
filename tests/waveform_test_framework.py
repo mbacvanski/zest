@@ -77,7 +77,7 @@ class WaveformTestFramework:
             self.assert_waveforms_close(
                 x_values, actual_df[name].values,
                 expected_df['x'].values, expected_df[name].values,
-                tolerance=1e-3, trace_name=name
+                tolerance=1e-3, trace_name=name, golden_file=golden_file
             )
     
     def resample_waveforms(self, time1: np.ndarray, values1: np.ndarray, 
@@ -137,7 +137,7 @@ class WaveformTestFramework:
     def assert_waveforms_close(self, time1: np.ndarray, values1: np.ndarray,
                               time2: np.ndarray, values2: np.ndarray,
                               tolerance: float = 1e-3, method: str = "mse",
-                              trace_name: str = "waveform") -> Tuple[bool, float]:
+                              trace_name: str = "waveform", golden_file: str = None) -> Tuple[bool, float]:
         """
         Assert that two waveforms are close within a specified tolerance.
         
@@ -149,6 +149,7 @@ class WaveformTestFramework:
             tolerance: Allowed tolerance for comparison
             method: Method for comparison ("mse", "max_diff", or "area_diff")
             trace_name: Name of the trace for error messages
+            golden_file: Name of the golden file being compared against (optional)
             
         Returns:
             is_close: Boolean indicating success
@@ -161,8 +162,9 @@ class WaveformTestFramework:
         is_close, metric = self.compare_waveforms(resampled1, resampled2, tolerance, method)
         
         if not is_close:
+            golden_info = f" (from {golden_file})" if golden_file else ""
             self.test_case.fail(
-                f"Waveforms for {trace_name} are not close! "
+                f"Waveforms for {trace_name}{golden_info} are not close! "
                 f"Metric ({method}) = {metric:.6f}, Tolerance = {tolerance}"
             )
         
