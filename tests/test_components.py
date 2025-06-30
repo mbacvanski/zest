@@ -12,7 +12,7 @@ import sys
 # Add the parent directory to the path to import zest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from zest import Circuit, VoltageSource, Resistor, Capacitor, Inductor, gnd
+from zest import Circuit, VoltageSource, PiecewiseLinearVoltageSource, Resistor, Capacitor, Inductor, gnd
 from zest.components import Component, Terminal, GroundTerminal, CurrentSource, ExternalSubCircuit
 from .golden_test_framework import GoldenTestMixin
 
@@ -199,6 +199,208 @@ class TestVoltageSource(unittest.TestCase):
         spice_line_forced = vs.to_spice(mapper, forced_name="V_SUPPLY")
         expected_forced = "V_SUPPLY VCC gnd DC 9.0"
         self.assertEqual(spice_line_forced, expected_forced)
+
+
+class TestPiecewiseLinearVoltageSource(unittest.TestCase):
+    """Test PiecewiseLinearVoltageSource component functionality."""
+    
+    def test_pwl_voltage_source_creation_default(self):
+        """Test PWL voltage source creation with default values."""
+        pwl_vs = PiecewiseLinearVoltageSource()
+        self.assertEqual(pwl_vs.time_voltage_pairs, [(0, 0)])
+        self.assertEqual(pwl_vs.name, "UNNAMED")
+    
+    def test_pwl_voltage_source_creation_custom(self):
+        """Test PWL voltage source creation with custom values."""
+        pairs = [(0, 0), (1e-3, 5), (2e-3, 0)]
+        pwl_vs = PiecewiseLinearVoltageSource(time_voltage_pairs=pairs, name="V_PWL")
+        self.assertEqual(pwl_vs.time_voltage_pairs, pairs)
+        self.assertEqual(pwl_vs.name, "V_PWL")
+    
+    def test_pwl_voltage_source_validation_empty_list(self):
+        """Test PWL voltage source validation for empty list."""
+        with self.assertRaises(ValueError) as context:
+            PiecewiseLinearVoltageSource(time_voltage_pairs=[])
+        self.assertIn("non-empty", str(context.exception))
+    
+    def test_pwl_voltage_source_validation_invalid_pairs(self):
+        """Test PWL voltage source validation for invalid pairs."""
+        # Test invalid pair format
+        with self.assertRaises(ValueError) as context:
+            PiecewiseLinearVoltageSource(time_voltage_pairs=[(0, 0), (1,)])  # Missing voltage
+        self.assertIn("(time, voltage) pair", str(context.exception))
+        
+        # Test non-numeric values
+        with self.assertRaises(ValueError) as context:
+            PiecewiseLinearVoltageSource(time_voltage_pairs=[(0, 0), ("1e-3", 5)])
+        self.assertIn("numbers", str(context.exception))
+        
+        # Test negative time
+        with self.assertRaises(ValueError) as context:
+            PiecewiseLinearVoltageSource(time_voltage_pairs=[(-1, 0), (1e-3, 5)])
+        self.assertIn("non-negative", str(context.exception))
+    
+    def test_pwl_voltage_source_validation_time_ordering(self):
+        """Test PWL voltage source validation for time ordering."""
+        # Test duplicate times - should fail
+        with self.assertRaises(ValueError) as context:
+            PiecewiseLinearVoltageSource(time_voltage_pairs=[(0, 0), (1e-3, 5), (1e-3, 3)])
+        self.assertIn("duplicate time", str(context.exception))
+        
+        # Test decreasing times - should now work because we auto-sort
+        # This should succeed and result in sorted pairs
+        pwl_vs = PiecewiseLinearVoltageSource(time_voltage_pairs=[(0, 0), (2e-3, 5), (1e-3, 3)])
+        expected_sorted = [(0, 0), (1e-3, 3), (2e-3, 5)]
+        self.assertEqual(pwl_vs.time_voltage_pairs, expected_sorted)
+    
+    def test_pwl_voltage_source_auto_sorting(self):
+        """Test that PWL voltage source auto-sorts time points."""
+        # Provide unsorted time points
+        unsorted_pairs = [(2e-3, 0), (0, 5), (1e-3, 10)]
+        expected_sorted = [(0, 5), (1e-3, 10), (2e-3, 0)]
+        
+        pwl_vs = PiecewiseLinearVoltageSource(time_voltage_pairs=unsorted_pairs)
+        self.assertEqual(pwl_vs.time_voltage_pairs, expected_sorted)
+    
+    def test_pwl_voltage_source_terminals(self):
+        """Test PWL voltage source terminals and aliases."""
+        pwl_vs = PiecewiseLinearVoltageSource([(0, 0), (1e-3, 5)])
+        
+        # Check terminal existence and aliases
+        self.assertTrue(hasattr(pwl_vs, 'pos'))
+        self.assertTrue(hasattr(pwl_vs, 'neg'))
+        self.assertTrue(hasattr(pwl_vs, 'positive'))
+        self.assertTrue(hasattr(pwl_vs, 'negative'))
+        
+        # Check aliases work correctly
+        self.assertEqual(pwl_vs.pos, pwl_vs.positive)
+        self.assertEqual(pwl_vs.neg, pwl_vs.negative)
+        
+        # Check terminal properties
+        self.assertEqual(pwl_vs.pos.component, pwl_vs)
+        self.assertEqual(pwl_vs.neg.component, pwl_vs)
+        self.assertEqual(pwl_vs.pos.terminal_name, "pos")
+        self.assertEqual(pwl_vs.neg.terminal_name, "neg")
+    
+    def test_pwl_voltage_source_get_terminals(self):
+        """Test PWL voltage source get_terminals method."""
+        pwl_vs = PiecewiseLinearVoltageSource()
+        terminals = pwl_vs.get_terminals()
+        
+        self.assertEqual(len(terminals), 2)
+        self.assertIn(('pos', pwl_vs.pos), terminals)
+        self.assertIn(('neg', pwl_vs.neg), terminals)
+    
+    def test_pwl_voltage_source_component_type_prefix(self):
+        """Test PWL voltage source component type prefix."""
+        pwl_vs = PiecewiseLinearVoltageSource()
+        self.assertEqual(pwl_vs.get_component_type_prefix(), "V")
+    
+    def test_pwl_voltage_source_spice_generation_simple(self):
+        """Test PWL voltage source SPICE generation for simple case."""
+        pwl_vs = PiecewiseLinearVoltageSource([(0, 0), (1e-3, 5)], name="V_PWL1")
+        
+        # Create a mock node mapper for testing
+        mapper = MockNodeMapper()
+        mapper.assign_name(pwl_vs.pos, "VCC")
+        mapper.assign_name(pwl_vs.neg, "gnd")
+        
+        spice_line = pwl_vs.to_spice(mapper)
+        expected = "V_PWL1 VCC gnd PWL(0 0 0.001 5)"
+        self.assertEqual(spice_line, expected)
+    
+    def test_pwl_voltage_source_spice_generation_complex(self):
+        """Test PWL voltage source SPICE generation for complex waveform."""
+        # Triangle wave
+        pairs = [(0, 0), (1e-3, 5), (2e-3, 0), (3e-3, -5), (4e-3, 0)]
+        pwl_vs = PiecewiseLinearVoltageSource(pairs, name="V_TRI")
+        
+        # Create a mock node mapper for testing
+        mapper = MockNodeMapper()
+        mapper.assign_name(pwl_vs.pos, "N1")
+        mapper.assign_name(pwl_vs.neg, "N2")
+        
+        spice_line = pwl_vs.to_spice(mapper)
+        expected = "V_TRI N1 N2 PWL(0 0 0.001 5 0.002 0 0.003 -5 0.004 0)"
+        self.assertEqual(spice_line, expected)
+    
+    def test_pwl_voltage_source_spice_generation_forced_name(self):
+        """Test PWL voltage source SPICE generation with forced name."""
+        pwl_vs = PiecewiseLinearVoltageSource([(0, 2), (1e-3, 8)], name="V_PWL")
+        
+        # Create a mock node mapper for testing
+        mapper = MockNodeMapper()
+        mapper.assign_name(pwl_vs.pos, "OUT")
+        mapper.assign_name(pwl_vs.neg, "gnd")
+        
+        spice_line = pwl_vs.to_spice(mapper, forced_name="V_CUSTOM")
+        expected = "V_CUSTOM OUT gnd PWL(0 2 0.001 8)"
+        self.assertEqual(spice_line, expected)
+    
+    def test_pwl_voltage_source_get_voltage_at_time_bounds(self):
+        """Test get_voltage_at_time method for boundary conditions."""
+        pairs = [(1e-3, 0), (2e-3, 5), (3e-3, 10)]
+        pwl_vs = PiecewiseLinearVoltageSource(pairs)
+        
+        # Before first point: should return first voltage
+        self.assertEqual(pwl_vs.get_voltage_at_time(0), 0)
+        self.assertEqual(pwl_vs.get_voltage_at_time(0.5e-3), 0)
+        
+        # At first point
+        self.assertEqual(pwl_vs.get_voltage_at_time(1e-3), 0)
+        
+        # After last point: should return last voltage
+        self.assertEqual(pwl_vs.get_voltage_at_time(3e-3), 10)
+        self.assertEqual(pwl_vs.get_voltage_at_time(5e-3), 10)
+    
+    def test_pwl_voltage_source_get_voltage_at_time_interpolation(self):
+        """Test get_voltage_at_time method for linear interpolation."""
+        pairs = [(0, 0), (2e-3, 10)]  # Linear ramp from 0V to 10V over 2ms
+        pwl_vs = PiecewiseLinearVoltageSource(pairs)
+        
+        # Test interpolation at midpoint
+        voltage_mid = pwl_vs.get_voltage_at_time(1e-3)
+        self.assertAlmostEqual(voltage_mid, 5.0, places=6)  # Should be 5V at 1ms
+        
+        # Test interpolation at quarter point
+        voltage_quarter = pwl_vs.get_voltage_at_time(0.5e-3)
+        self.assertAlmostEqual(voltage_quarter, 2.5, places=6)  # Should be 2.5V at 0.5ms
+        
+        # Test interpolation at three-quarter point
+        voltage_three_quarter = pwl_vs.get_voltage_at_time(1.5e-3)
+        self.assertAlmostEqual(voltage_three_quarter, 7.5, places=6)  # Should be 7.5V at 1.5ms
+    
+    def test_pwl_voltage_source_get_voltage_at_time_complex(self):
+        """Test get_voltage_at_time method for complex multi-segment waveform."""
+        # Two-segment ramp: 0->5V (0-1ms), 5->0V (1-2ms)
+        pairs = [(0, 0), (1e-3, 5), (2e-3, 0)]
+        pwl_vs = PiecewiseLinearVoltageSource(pairs)
+        
+        # First segment (0 to 1ms): 0V to 5V
+        self.assertAlmostEqual(pwl_vs.get_voltage_at_time(0.5e-3), 2.5, places=6)
+        self.assertAlmostEqual(pwl_vs.get_voltage_at_time(1e-3), 5.0, places=6)
+        
+        # Second segment (1ms to 2ms): 5V to 0V
+        self.assertAlmostEqual(pwl_vs.get_voltage_at_time(1.5e-3), 2.5, places=6)
+        self.assertAlmostEqual(pwl_vs.get_voltage_at_time(2e-3), 0.0, places=6)
+    
+    def test_pwl_voltage_source_get_voltage_at_time_negative_time(self):
+        """Test get_voltage_at_time method with negative time (should raise error)."""
+        pwl_vs = PiecewiseLinearVoltageSource([(0, 0), (1e-3, 5)])
+        
+        with self.assertRaises(ValueError) as context:
+            pwl_vs.get_voltage_at_time(-1e-3)
+        self.assertIn("non-negative", str(context.exception))
+    
+    def test_pwl_voltage_source_representation(self):
+        """Test PWL voltage source string representation."""
+        pairs = [(0, 0), (1e-3, 5), (2e-3, 0)]
+        pwl_vs = PiecewiseLinearVoltageSource(pairs, name="V_PWL_TEST")
+        
+        repr_str = repr(pwl_vs)
+        self.assertIn("PiecewiseLinearVoltageSource", repr_str)
+        self.assertIn("V_PWL_TEST", repr_str)
+        self.assertIn("3 points", repr_str)  # Should show number of points
 
 
 class TestResistor(unittest.TestCase):
@@ -583,6 +785,58 @@ class TestComponentIntegration(GoldenTestMixin, unittest.TestCase):
         self.assertIn("VCC", spice)  # Voltage source
         self.assertIn("R1", spice)  # Resistors
         self.assertIn("R2", spice)
+    
+    def test_pwl_voltage_source_in_circuit(self):
+        """Test PiecewiseLinearVoltageSource integration with Circuit."""
+        circuit = Circuit("PWL Voltage Source Test")
+        
+        # Create a PWL voltage source and resistor
+        # Step function: 0V -> 5V at 1ms
+        pwl_vs = PiecewiseLinearVoltageSource([(0, 0), (1e-3, 5)], name="V_PWL")
+        r1 = Resistor(resistance=1000, name="R1")
+        
+        circuit.add_component(pwl_vs)
+        circuit.add_component(r1)
+        
+        # Wire PWL voltage source through resistor
+        circuit.wire(pwl_vs.pos, r1.n1)
+        circuit.wire(pwl_vs.neg, circuit.gnd)
+        circuit.wire(r1.n2, circuit.gnd)
+        
+        # Generate SPICE and check
+        spice = circuit.compile_to_spice()
+        self.assertIn("V_PWL", spice)
+        self.assertIn("R1", spice)
+        self.assertIn("PWL(0 0 0.001 5)", spice)  # PWL specification
+    
+    def test_pwl_voltage_source_triangle_wave(self):
+        """Test PiecewiseLinearVoltageSource with triangle wave pattern."""
+        circuit = Circuit("Triangle Wave Test")
+        
+        # Triangle wave: 0V -> 5V -> 0V -> -5V -> 0V
+        triangle_pairs = [
+            (0, 0),
+            (1e-3, 5),
+            (2e-3, 0),
+            (3e-3, -5),
+            (4e-3, 0)
+        ]
+        
+        pwl_vs = PiecewiseLinearVoltageSource(triangle_pairs, name="V_TRI")
+        r_load = Resistor(resistance=1000, name="R_LOAD")
+        
+        circuit.add_component(pwl_vs)
+        circuit.add_component(r_load)
+        
+        # Connect as voltage divider
+        circuit.wire(pwl_vs.pos, r_load.n1)
+        circuit.wire(pwl_vs.neg, circuit.gnd)
+        circuit.wire(r_load.n2, circuit.gnd)
+        
+        # Verify SPICE generation
+        spice = circuit.compile_to_spice()
+        self.assertIn("V_TRI", spice)
+        self.assertIn("PWL(0 0 0.001 5 0.002 0 0.003 -5 0.004 0)", spice)
 
 
 if __name__ == '__main__':

@@ -162,6 +162,239 @@ def demo_comparator_dc_sweep_simulation():
     print(f"📊 DC sweep plot saved as 'comparator_dc_sweep.png'")
     plt.show()
 
+def create_lif_neuron_subcircuit_def():
+    """Create a leaky integrate-and-fire neuron subcircuit definition."""
+    lif = SubCircuitDef("lif_neuron")
+    
+    # Use relative path for models
+    lif.add_include("examples/models/mosfets.lib")
+    
+    # External pins for the LIF neuron
+    pin_i_input = Terminal()  # Current input
+    pin_v_mem = Terminal()    # Membrane voltage output  
+    pin_spike = Terminal()    # Spike output from comparator
+    pin_vdd = Terminal()      # Power supply
+    pin_vss = Terminal()      # Ground
+    
+    lif.add_pin("I_INPUT", pin_i_input)
+    lif.add_pin("V_MEM", pin_v_mem) 
+    lif.add_pin("SPIKE", pin_spike)
+    lif.add_pin("VDD", pin_vdd)
+    lif.add_pin("VSS", pin_vss)
+    
+    # Internal nodes
+    v_threshold = Terminal()  # Reference threshold voltage
+    
+    # === RC MEMBRANE MODEL ===
+    # Membrane resistance (100kΩ for τ=10ms with C=100nF)
+    from zest.components import Resistor, Capacitor, VoltageSource
+    
+    r_mem = Resistor(resistance=100e3, name="R_MEM")  # 100kΩ
+    lif.add_component(r_mem)
+    lif.wire(r_mem.n1, pin_v_mem)     # One end to membrane voltage
+    lif.wire(r_mem.n2, pin_vss)       # Other end to ground (leak)
+    
+    # Membrane capacitance (100nF for τ=10ms with R=100kΩ)  
+    c_mem = Capacitor(capacitance=100e-9, name="C_MEM")  # 100nF
+    lif.add_component(c_mem)
+    lif.wire(c_mem.pos, pin_v_mem)    # Positive plate to membrane voltage
+    lif.wire(c_mem.neg, pin_vss)      # Negative plate to ground
+    
+    # Current input connection (external current source will connect here)
+    # The input current flows into the V_MEM node, charging the capacitor
+    # and flowing through the resistor (creating the leaky integration)
+    lif.wire(pin_i_input, pin_v_mem)  # Input current flows to membrane
+    
+    # === THRESHOLD DETECTION ===
+    # For now, let's simplify and just connect the spike output directly to the membrane voltage
+    # to test the RC charging behavior without the comparator complexity
+    lif.wire(pin_spike, pin_v_mem)    # Temporary: spike output = membrane voltage
+    
+    # TODO: Add comparator back once RC charging is working properly
+    
+    return lif
+
+
+def create_lif_test_circuit(input_current=10e-6):
+    """Create a test circuit for the LIF neuron with specified input current."""
+    from zest.components import VoltageSource, CurrentSource
+    
+    # Create the test circuit
+    test_circuit = Circuit("LIF_Test")
+    
+    # Add voltage sources
+    vdd = VoltageSource(voltage=1.8, name="VDD")
+    vss = VoltageSource(voltage=0.0, name="VSS")
+    
+    # Input current source (10µA default)
+    i_input = CurrentSource(current=input_current, name="I_INPUT")
+    
+    # Create LIF neuron instance
+    lif_def = create_lif_neuron_subcircuit_def()
+    neuron = SubCircuit(definition=lif_def, name="NEURON1")
+    
+    # Wire up the test circuit
+    test_circuit.wire(vdd.neg, test_circuit.gnd)
+    test_circuit.wire(vss.pos, test_circuit.gnd)
+    
+    # Power connections
+    test_circuit.wire(neuron.VDD, vdd.pos)
+    test_circuit.wire(neuron.VSS, vss.neg)
+    
+    # Input current connection (fix direction: current should flow INTO the neuron)
+    test_circuit.wire(i_input.neg, neuron.I_INPUT)  # Negative terminal to neuron (current flows out of source into neuron)
+    test_circuit.wire(i_input.pos, test_circuit.gnd)  # Positive terminal to ground
+    
+    return test_circuit, neuron, i_input
+
+
+def demo_lif_rc_charging():
+    """Demonstrate the RC charging behavior of the LIF neuron."""
+    print("\n⚡ LIF Neuron RC Charging Demo")
+    print("=" * 50)
+    
+    # Create test circuit with 5µA input current (should reach 0.5V steady-state)
+    circuit, neuron, i_input = create_lif_test_circuit(5e-6)
+    
+    # DEBUG: Print the SPICE netlist to understand the issue
+    print("Generated SPICE netlist:")
+    print("="*60)
+    netlist = circuit.compile_to_spice()
+    print(netlist)
+    print("="*60)
+    
+    print("Circuit parameters:")
+    print(f"  R_membrane = 100kΩ")
+    print(f"  C_membrane = 100nF") 
+    print(f"  τ = RC = 10ms")
+    print(f"  I_input = 5µA")
+    print(f"  V_threshold = 1.0V")
+    
+    # Calculate expected behavior
+    R = 100e3  # 100kΩ
+    I = 5e-6   # 5µA
+    tau = 10e-3  # 10ms
+    V_final = I * R  # Final voltage if no threshold
+    
+    print(f"\nExpected behavior:")
+    print(f"  V_final = I×R = {V_final:.3f}V")
+    print(f"  Time to 63% = τ = {tau*1000:.1f}ms")
+    
+    # Calculate time to threshold (avoid log(0) when V_final = V_threshold)
+    if V_final > 1.0:
+        t_threshold = -tau * np.log(1 - 1.0/V_final) * 1000
+        print(f"  Time to threshold (1.0V) ≈ {t_threshold:.1f}ms")
+    elif V_final == 1.0:
+        print(f"  Time to threshold (1.0V) ≈ ∞ (asymptotic approach)")
+    else:
+        print(f"  Threshold (1.0V) never reached (V_final < threshold)")
+    
+    # Run transient simulation
+    print("\nRunning transient simulation (0 to 50ms)...")
+    
+    simulated_circuit = circuit.simulate_transient(
+        step_time=0.1e-3,  # 0.1ms steps
+        end_time=50e-3     # 50ms total
+    )
+    
+    print("✅ Transient simulation completed!")
+    
+    # Debug: Show available nodes
+    print("Debug - Available nodes:")
+    for node_name in simulated_circuit.nodes.keys():
+        print(f"  {node_name}")
+    
+    print("Debug - Circuit components:")
+    for comp, name in simulated_circuit.list_components():
+        print(f"  {name}: {comp}")
+    
+    # Extract results
+    time = simulated_circuit.get_time_vector()
+    
+    try:
+        v_mem = simulated_circuit.get_node_voltage(neuron.V_MEM)
+        print(f"✅ Got V_MEM voltage data")
+    except Exception as e:
+        print(f"❌ Error getting V_MEM: {e}")
+        # Fallback: try to access membrane voltage via the I_INPUT node (N3)
+        try:
+            # The RC charging happens at the I_INPUT node (N3 in SPICE)
+            v_mem = simulated_circuit._get_node_voltage_value('n3')
+            print(f"✅ Got V_MEM via I_INPUT node: n3")
+        except Exception as e2:
+            print(f"❌ Fallback also failed: {e2}")
+            v_mem = None
+        
+    try:
+        v_spike = simulated_circuit.get_node_voltage(neuron.SPIKE)
+        print(f"✅ Got SPIKE voltage data")
+    except Exception as e:
+        print(f"❌ Error getting SPIKE: {e}")
+        # Fallback: SPIKE is connected to V_MEM which is connected to I_INPUT (N3)
+        try:
+            v_spike = simulated_circuit._get_node_voltage_value('n3')
+            print(f"✅ Got SPIKE via I_INPUT node: n3")
+        except Exception as e2:
+            print(f"❌ SPIKE fallback also failed: {e2}")
+            v_spike = None
+    
+    print(f"Simulation results:")
+    print(f"  Time points: {len(time) if time is not None else 'N/A'}")
+    
+    if v_mem is not None:
+        print(f"  V_mem range: {min(v_mem):.3f}V to {max(v_mem):.3f}V")
+        # Check if threshold was reached
+        threshold_reached = np.any(v_mem >= 1.0)
+        if threshold_reached:
+            crossing_time = time[np.where(v_mem >= 1.0)[0][0]]
+            print(f"🎯 Threshold reached at t = {crossing_time*1000:.1f}ms")
+        else:
+            print("⚠️  Threshold not reached in simulation time")
+    else:
+        print("  V_mem: Not available")
+        
+    if v_spike is not None:
+        print(f"  V_spike range: {min(v_spike):.3f}V to {max(v_spike):.3f}V")
+    else:
+        print("  V_spike: Not available")
+    
+    # Plot results (only if we have data)
+    if time is not None and (v_mem is not None or v_spike is not None):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+        
+        # Membrane voltage
+        if v_mem is not None:
+            ax1.plot(time*1000, v_mem, 'b-', linewidth=2, label='V_membrane')
+            ax1.axhline(y=1.0, color='r', linestyle='--', alpha=0.7, label='Threshold (1.0V)')
+            ax1.axhline(y=V_final, color='g', linestyle=':', alpha=0.7, label=f'V_final = {V_final:.2f}V')
+        else:
+            ax1.text(0.5, 0.5, 'V_membrane data not available', ha='center', va='center', transform=ax1.transAxes)
+        ax1.set_ylabel('Membrane Voltage (V)')
+        ax1.set_title('LIF Neuron: RC Charging Behavior')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        ax1.set_xlim(0, 50)
+        
+        # Spike output  
+        if v_spike is not None:
+            ax2.plot(time*1000, v_spike, 'r-', linewidth=2, label='Spike Output')
+        else:
+            ax2.text(0.5, 0.5, 'V_spike data not available', ha='center', va='center', transform=ax2.transAxes)
+        ax2.set_xlabel('Time (ms)')
+        ax2.set_ylabel('Spike Voltage (V)')
+        ax2.set_title('Comparator Output (Spike Detection)')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        ax2.set_xlim(0, 50)
+        
+        plt.tight_layout()
+        plt.savefig('lif_neuron_response.png', dpi=150, bbox_inches='tight')
+        print(f"📊 Plot saved as 'lif_neuron_response.png'")
+        plt.show()
+    else:
+        print("⚠️  No plotting data available")
+
+
 def main():
     # Create the comparator subcircuit definition
     comparator_def = create_comparator_subcircuit_def()
@@ -205,6 +438,13 @@ def main():
     
     # Demo 3: Built-in DC sweep
     demo_comparator_dc_sweep_simulation()
+    
+    # NEW: Demo LIF neuron RC charging
+    print("\n" + "="*60)
+    print("🧠 RUNNING LIF NEURON DEMOS")
+    print("="*60)
+    
+    demo_lif_rc_charging()
 
 
 if __name__ == "__main__":

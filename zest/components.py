@@ -176,6 +176,146 @@ class VoltageSource(Component):
         results['voltage_across'] = v_pos - v_neg
 
 
+class PiecewiseLinearVoltageSource(Component):
+    """Piecewise linear voltage source component for time-varying signals."""
+    
+    def __init__(self, time_voltage_pairs=None, name=None):
+        """
+        Initialize a piecewise linear voltage source.
+        
+        Args:
+            time_voltage_pairs: List of (time, voltage) tuples defining the waveform.
+                              If None, defaults to [(0, 0)] for a 0V constant source.
+            name: Optional component name
+            
+        Examples:
+            # Step function: 0V -> 5V at 1ms
+            pwl_vs = PiecewiseLinearVoltageSource([(0, 0), (1e-3, 5)])
+            
+            # Triangle wave: 0V -> 5V -> 0V -> -5V
+            pwl_vs = PiecewiseLinearVoltageSource([
+                (0, 0), (1e-3, 5), (2e-3, 0), (3e-3, -5)
+            ])
+        """
+        if time_voltage_pairs is None:
+            time_voltage_pairs = [(0, 0)]
+        
+        # Validate input
+        if not isinstance(time_voltage_pairs, (list, tuple)) or len(time_voltage_pairs) < 1:
+            raise ValueError("time_voltage_pairs must be a non-empty list or tuple of (time, voltage) pairs")
+        
+        # Validate each pair
+        for i, pair in enumerate(time_voltage_pairs):
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(f"Element {i} must be a (time, voltage) pair, got {pair}")
+            
+            time, voltage = pair
+            if not isinstance(time, (int, float)) or not isinstance(voltage, (int, float)):
+                raise ValueError(f"Time and voltage must be numbers, got {pair}")
+            
+            if time < 0:
+                raise ValueError(f"Time values must be non-negative, got {time}")
+        
+        # Sort by time to ensure proper ordering
+        self.time_voltage_pairs = sorted(time_voltage_pairs, key=lambda x: x[0])
+        
+        # Validate that times are strictly increasing (no duplicates) after sorting
+        for i in range(1, len(self.time_voltage_pairs)):
+            if self.time_voltage_pairs[i][0] == self.time_voltage_pairs[i-1][0]:
+                raise ValueError(f"Time values must be strictly increasing. "
+                               f"Found duplicate time value: {self.time_voltage_pairs[i][0]}")
+        
+        super().__init__(name)
+        
+        # Create terminals - these are the nodes in the graph
+        self.pos = Terminal(self, "pos")
+        self.neg = Terminal(self, "neg")
+        
+        # Aliases for convenience
+        self.positive = self.pos
+        self.negative = self.neg
+    
+    def get_component_type_prefix(self):
+        return "V"
+    
+    def get_terminals(self):
+        return [('pos', self.pos), ('neg', self.neg)]
+    
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE PWL format using NodeMapper."""
+        pos_node = mapper.name_for(self.pos)
+        neg_node = mapper.name_for(self.neg)
+        
+        # Build PWL string: PWL(t1 v1 t2 v2 ...)
+        pwl_values = []
+        for time, voltage in self.time_voltage_pairs:
+            pwl_values.append(str(time))
+            pwl_values.append(str(voltage))
+        
+        pwl_string = "PWL(" + " ".join(pwl_values) + ")"
+        
+        return f"{forced_name or self.name} {pos_node} {neg_node} {pwl_string}"
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """Add PWL voltage source specific results: current and voltage across."""
+        # Use the new deterministic current method
+        try:
+            current_value = simulated_circuit.get_component_current(self)
+            results['current'] = current_value
+        except ValueError:
+            # Current not available in simulation results
+            pass
+        
+        # Calculate voltage across the source
+        terminal_voltages = results['terminal_voltages']
+        v_pos_raw = terminal_voltages.get('pos', 0.0)
+        v_neg_raw = terminal_voltages.get('neg', 0.0)
+        
+        # Extract scalar values from simulation data (handles both scalars and arrays)
+        v_pos = simulated_circuit._extract_value(v_pos_raw)
+        v_neg = simulated_circuit._extract_value(v_neg_raw)
+        
+        results['voltage_across'] = v_pos - v_neg
+    
+    def get_voltage_at_time(self, t):
+        """
+        Calculate the voltage at a specific time using linear interpolation.
+        
+        Args:
+            t: Time value
+            
+        Returns:
+            float: Interpolated voltage at time t
+        """
+        if t < 0:
+            raise ValueError("Time must be non-negative")
+        
+        # Before first point: use first voltage
+        if t <= self.time_voltage_pairs[0][0]:
+            return self.time_voltage_pairs[0][1]
+        
+        # After last point: use last voltage
+        if t >= self.time_voltage_pairs[-1][0]:
+            return self.time_voltage_pairs[-1][1]
+        
+        # Find the two points to interpolate between
+        for i in range(len(self.time_voltage_pairs) - 1):
+            t1, v1 = self.time_voltage_pairs[i]
+            t2, v2 = self.time_voltage_pairs[i + 1]
+            
+            if t1 <= t <= t2:
+                # Linear interpolation: v = v1 + (v2-v1) * (t-t1)/(t2-t1)
+                if t2 == t1:  # Avoid division by zero (shouldn't happen due to validation)
+                    return v1
+                return v1 + (v2 - v1) * (t - t1) / (t2 - t1)
+        
+        # Shouldn't reach here due to the bounds checks above
+        return self.time_voltage_pairs[-1][1]
+    
+    def __repr__(self):
+        return f"PiecewiseLinearVoltageSource({self.name}, {len(self.time_voltage_pairs)} points)"
+
+
 class Resistor(Component):
     """Resistor component."""
     

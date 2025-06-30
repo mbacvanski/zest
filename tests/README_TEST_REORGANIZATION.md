@@ -43,14 +43,6 @@ These remain unchanged as they provide shared testing utilities:
 - `simple_test_helpers.py` - Simple test helper functions
 - `test_helpers.py` - General test helper functions
 
-## Benefits of New Organization
-
-1. **Class-based grouping**: All tests for a given class are in one file
-2. **Easier navigation**: Know exactly where to find tests for `Resistor` class
-3. **Better maintainability**: Changes to a class only affect one test file
-4. **Clearer separation**: Core functionality vs. integration scenarios
-5. **Canonical structure**: Follows the main codebase module organization
-
 ## Running Tests
 
 ```bash
@@ -70,19 +62,3 @@ python -m pytest tests/test_circuit.py::TestCircuit
 # Run specific test method  
 python -m pytest tests/test_components.py::TestVoltageSource::test_voltage_source_creation
 ```
-
-## Migration from Old Files
-
-The content from these old files has been consolidated:
-
-- `test_new_components.py` → `test_components.py`
-- `test_graph_api.py` → `test_circuit.py` 
-- `test_subcircuits.py` → `test_circuit.py`
-- `test_spice_generation.py` → `test_circuit.py` and `test_simulation.py`
-- `test_pyspice_integration.py` → `test_simulation.py`
-- `test_cascaded_filter_simulation.py` → `test_integration.py`
-- `test_transient_analysis.py` → `test_integration.py`
-- `test_subcircuit_simulation.py` → `test_integration.py`
-- `test_analysis_types.py` → `test_simulation.py`
-
-You can safely remove the old test files once you verify the new organization works correctly. 
