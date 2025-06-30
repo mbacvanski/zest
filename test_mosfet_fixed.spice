@@ -1,0 +1,11 @@
+* Circuit: MOSFETTest
+
+* ===== Model Includes ===== *
+.INCLUDE "/Users/marc/Code/zest/examples/models/mosfets.lib"
+
+VVDD N1 gnd DC 1.8
+VVGS N2 gnd DC 0.8
+XM1 N1 N2 gnd gnd NMOS_SUBCKT W=2u L=0.18u
+
+.op
+.end

@@ -1,0 +1,25 @@
+*============================*
+*  Idealized Level-1 Models *
+*============================*
+
+* NMOS Model
+.model IDEAL_NMOS NMOS (LEVEL=1 VTO=0.4 KP=120u LAMBDA=0.02 PHI=0.6 GAMMA=0.5)
+
+* PMOS Model
+.model IDEAL_PMOS PMOS (LEVEL=1 VTO=-0.4 KP=40u LAMBDA=0.02 PHI=0.6 GAMMA=0.5)
+
+*==============================*
+*  NMOS Subcircuit Declaration *
+*==============================*
+* Nodes: Drain Gate Source Bulk
+.subckt NMOS_SUBCKT D G S B W=10u L=0.18u
+M1 D G S B IDEAL_NMOS W={W} L={L}
+.ends NMOS_SUBCKT
+
+*==============================*
+*  PMOS Subcircuit Declaration *
+*==============================*
+* Nodes: Drain Gate Source Bulk
+.subckt PMOS_SUBCKT D G S B W=10u L=0.18u
+M1 D G S B IDEAL_PMOS W={W} L={L}
+.ends PMOS_SUBCKT

@@ -522,8 +522,22 @@ class CircuitRoot(NetlistBlock):
         from .simulation import CircuitSimulator
         return CircuitSimulator(self)
     
-    def simulate_operating_point(self, backend=None, temperature=25, add_current_probes=False, keep_temp_files=False, debug_cleanup=False):
-        """Run DC operating point analysis."""
+    def simulate_operating_point(self, backend=None, temperature=25, add_current_probes=False, cleanup="silent"):
+        """
+        Run DC operating point analysis.
+        
+        Args:
+            backend: Simulation backend (defaults to SpicelibBackend)
+            temperature: Simulation temperature in Celsius (default: 25)
+            add_current_probes: Add current probes for measurements (default: False)
+            cleanup: Temporary file cleanup mode (default: "silent")
+                - "silent": Clean up files silently 
+                - "verbose": Clean up files with debug output
+                - "keep": Keep files for debugging
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
         if backend is None:
             from .simulation import SpicelibBackend
             backend = SpicelibBackend()
@@ -534,12 +548,28 @@ class CircuitRoot(NetlistBlock):
             analyses=["op"], 
             temperature=temperature,
             circuit=self,
-            keep_temp_files=keep_temp_files,
-            debug_cleanup=debug_cleanup
+            cleanup=cleanup
         )
     
-    def simulate_dc_sweep(self, source_name, start, stop, step, backend=None, temperature=25, keep_temp_files=False):
-        """Run DC sweep analysis."""
+    def simulate_dc_sweep(self, source_name, start, stop, step, backend=None, temperature=25, cleanup="silent"):
+        """
+        Run DC sweep analysis.
+        
+        Args:
+            source_name: Name of the voltage/current source to sweep
+            start: Starting value for the sweep
+            stop: Ending value for the sweep  
+            step: Step size for the sweep
+            backend: Simulation backend (defaults to SpicelibBackend)
+            temperature: Simulation temperature in Celsius (default: 25)
+            cleanup: Temporary file cleanup mode (default: "silent")
+                - "silent": Clean up files silently 
+                - "verbose": Clean up files with debug output
+                - "keep": Keep files for debugging
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
         if backend is None:
             from .simulation import SpicelibBackend
             backend = SpicelibBackend()
@@ -554,11 +584,27 @@ class CircuitRoot(NetlistBlock):
             start=start,
             stop=stop,
             step=step,
-            keep_temp_files=keep_temp_files
+            cleanup=cleanup
         )
     
-    def simulate_ac(self, start_freq=1, stop_freq=1e6, points_per_decade=10, backend=None, temperature=25, keep_temp_files=False):
-        """Run AC analysis."""
+    def simulate_ac(self, start_freq=1, stop_freq=1e6, points_per_decade=10, backend=None, temperature=25, cleanup="silent"):
+        """
+        Run AC analysis.
+        
+        Args:
+            start_freq: Starting frequency for the sweep (default: 1 Hz)
+            stop_freq: Ending frequency for the sweep (default: 1 MHz)
+            points_per_decade: Number of frequency points per decade (default: 10)
+            backend: Simulation backend (defaults to SpicelibBackend)
+            temperature: Simulation temperature in Celsius (default: 25)
+            cleanup: Temporary file cleanup mode (default: "silent")
+                - "silent": Clean up files silently 
+                - "verbose": Clean up files with debug output
+                - "keep": Keep files for debugging
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
         if backend is None:
             from .simulation import SpicelibBackend
             backend = SpicelibBackend()
@@ -572,11 +618,27 @@ class CircuitRoot(NetlistBlock):
             start_freq=start_freq,
             stop_freq=stop_freq,
             points_per_decade=points_per_decade,
-            keep_temp_files=keep_temp_files
+            cleanup=cleanup
         )
     
-    def simulate_transient(self, step_time, end_time, start_time=0, backend=None, temperature=25, keep_temp_files=False):
-        """Run transient analysis."""
+    def simulate_transient(self, step_time, end_time, start_time=0, backend=None, temperature=25, cleanup="silent"):
+        """
+        Run transient analysis.
+        
+        Args:
+            step_time: Maximum time step for the simulation
+            end_time: End time for the simulation  
+            start_time: Start time for the simulation (default: 0)
+            backend: Simulation backend (defaults to SpicelibBackend)
+            temperature: Simulation temperature in Celsius (default: 25)
+            cleanup: Temporary file cleanup mode (default: "silent")
+                - "silent": Clean up files silently 
+                - "verbose": Clean up files with debug output
+                - "keep": Keep files for debugging
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
         if backend is None:
             from .simulation import SpicelibBackend
             backend = SpicelibBackend()
@@ -590,7 +652,7 @@ class CircuitRoot(NetlistBlock):
             step_time=step_time,
             end_time=end_time,
             start_time=start_time,
-            keep_temp_files=keep_temp_files
+            cleanup=cleanup
         )
     
     def __repr__(self):

@@ -1,5 +1,29 @@
 """
 Simulation capabilities for Zest circuits using spicelib/NGspice.
+
+TEMPORARY FILE CLEANUP:
+The simulation backend supports a unified 'cleanup' parameter that controls how
+temporary files (netlists, raw simulation data, log files) are managed:
+
+- cleanup="silent" (default): Clean up files silently after simulation
+- cleanup="verbose": Clean up files with debug output showing what's being removed  
+- cleanup="keep": Keep all files for debugging (files remain in temp_spice_sim/)
+
+Usage examples:
+    # Default silent cleanup
+    result = circuit.simulate_operating_point()
+    
+    # Verbose cleanup with debug output
+    result = circuit.simulate_dc_sweep("V1", 0, 5, 0.1, cleanup="verbose")
+    
+    # Keep files for debugging
+    result = circuit.simulate_transient(1e-6, 1e-3, cleanup="keep")
+
+The cleanup system automatically handles:
+- Initial netlist files (*.net)
+- Simulation output files (*.raw) 
+- Log files (*.log)
+- Failed simulation files (*.fail)
 """
 
 import numpy as np
@@ -48,9 +72,16 @@ class SpicelibBackend(SimulatorBackend):
         
         Args:
             netlist: Complete SPICE netlist string
-            analyses: List of analysis types (currently supports 'transient')
-            **kwargs: Additional simulation parameters like step_time, end_time, etc.
-                     keep_temp_files: Boolean to keep temporary files for debugging (default: False)
+            analyses: List of analysis types ('transient', 'dc', 'ac', 'op')
+            **kwargs: Additional simulation parameters:
+                cleanup: Temporary file cleanup mode (default: "silent")
+                    - "silent": Clean up files silently 
+                    - "verbose": Clean up files with debug output
+                    - "keep": Keep files for debugging
+                step_time, end_time: For transient analysis
+                source_name, start, stop, step: For DC sweep analysis
+                start_freq, stop_freq, points_per_decade: For AC analysis
+                temperature: Simulation temperature in Celsius
             
         Returns:
             SimulatedCircuit: Simulation results
@@ -121,11 +152,10 @@ class SpicelibBackend(SimulatorBackend):
                 )
                 
             finally:
-                # Clean up temporary files (unless user wants to keep them for debugging)
-                keep_temp_files = kwargs.get('keep_temp_files', False)
-                debug_cleanup = kwargs.get('debug_cleanup', False)
+                # Clean up temporary files based on cleanup mode
+                cleanup_mode = kwargs.get('cleanup', 'silent')
                 
-                if not keep_temp_files:
+                if cleanup_mode != 'keep':
                     files_to_clean = [netlist_file]
                     
                     # Add output files from spicelib simulation
@@ -155,7 +185,8 @@ class SpicelibBackend(SimulatorBackend):
                     fail_files = glob.glob(fail_pattern)
                     files_to_clean.extend(fail_files)
                     
-                    if debug_cleanup:
+                    verbose_cleanup = (cleanup_mode == 'verbose')
+                    if verbose_cleanup:
                         print(f"🧹 Cleanup: Found {len(files_to_clean)} files to clean:")
                         for f in files_to_clean:
                             print(f"  - {f} (exists: {os.path.exists(f)})")
@@ -167,14 +198,14 @@ class SpicelibBackend(SimulatorBackend):
                             try:
                                 os.unlink(file_path)
                                 cleaned_count += 1
-                                if debug_cleanup:
+                                if verbose_cleanup:
                                     print(f"  ✅ Cleaned: {file_path}")
                             except OSError as e:
-                                if debug_cleanup:
+                                if verbose_cleanup:
                                     print(f"  ❌ Failed to clean {file_path}: {e}")
                                 pass
                     
-                    if debug_cleanup:
+                    if verbose_cleanup:
                         print(f"🧹 Cleanup completed: {cleaned_count}/{len(files_to_clean)} files removed")
                     
         except ImportError:
@@ -475,6 +506,45 @@ class SimulatedCircuit:
             return None
         
         return getattr(self, 'time', None)
+    
+    def get_sweep_variable(self):
+        """
+        Get the sweep variable from DC sweep analysis results.
+        
+        Returns:
+            numpy.ndarray: Sweep variable values, or None if not DC sweep analysis
+        """
+        if self.analysis_type != "DC Sweep":
+            return None
+        
+        # Look for the sweep variable (typically 'v-sweep' for voltage sweeps)
+        sweep_candidates = ['v-sweep', 'V-SWEEP']
+        for candidate in sweep_candidates:
+            if candidate in self.nodes:
+                return self._extract_value(self.nodes[candidate])
+        
+        # If not found, look for any trace with 'sweep' in the name
+        for node_name, node_data in self.nodes.items():
+            if 'sweep' in node_name.lower():
+                return self._extract_value(node_data)
+        
+        return None
+    
+    def is_dc_sweep(self):
+        """Check if this is a DC sweep analysis."""
+        return self.analysis_type == "DC Sweep"
+    
+    def is_transient(self):
+        """Check if this is a transient analysis."""
+        return self.analysis_type == "Transient Analysis"
+    
+    def is_ac_analysis(self):
+        """Check if this is an AC analysis."""
+        return self.analysis_type == "AC Analysis"
+    
+    def is_operating_point(self):
+        """Check if this is a DC operating point analysis."""
+        return self.analysis_type == "DC Operating Point"
 
 
 class CircuitSimulator:
