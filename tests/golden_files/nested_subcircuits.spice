@@ -1,0 +1,21 @@
+* Circuit: Nested_Subcircuits_Test
+
+* ===== Subcircuit Definitions ===== *
+.SUBCKT BASIC_RC_STAGE input output gnd
+RR_stage input output 1000
+CC_stage output gnd 1e-07
+.ENDS BASIC_RC_STAGE
+
+.SUBCKT TWO_STAGE_RC_FILTER input output gnd
+XSTAGE1 input N1 gnd BASIC_RC_STAGE
+XSTAGE2 N1 output gnd BASIC_RC_STAGE
+.ENDS TWO_STAGE_RC_FILTER
+
+* ===== Main Circuit Components ===== *
+V1 N1 gnd DC 3.3
+XU_NESTED_FILTER N1 N2 gnd TWO_STAGE_RC_FILTER
+
+* Initial Conditions
+.IC V(N2)=0.0
+
+.end

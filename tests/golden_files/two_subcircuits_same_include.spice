@@ -1,0 +1,21 @@
+* Circuit: Two_Different_Subcircuits_Same_Include
+
+* ===== Model Includes ===== *
+.INCLUDE "/Users/marc/Code/zest/tests/models/custom_resistor.lib"
+
+* ===== Subcircuit Definitions ===== *
+.SUBCKT SIMPLE_ATTENUATOR vin vout gnd
+XR_custom vin vout CUSTOM_RESISTOR
+RR_normal vout gnd 10000
+.ENDS SIMPLE_ATTENUATOR
+
+.SUBCKT SIMPLE_LOAD input gnd
+XR_load input gnd CUSTOM_RESISTOR
+.ENDS SIMPLE_LOAD
+
+* ===== Main Circuit Components ===== *
+V1 N1 gnd DC 5.0
+XU_ATTEN N1 N2 gnd SIMPLE_ATTENUATOR
+XU_LOAD N2 gnd SIMPLE_LOAD
+
+.end

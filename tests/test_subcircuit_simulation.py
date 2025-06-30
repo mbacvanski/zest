@@ -187,19 +187,13 @@ class TestSubcircuitSimulation(WaveformTestMixin, unittest.TestCase):
         # Convert time to milliseconds for better readability
         times_ms = times * 1000
         
-        try:
-            self.assert_waveform_matches_golden(
-                "astable_multivibrator.csv",
-                times_ms,
-                [q1_collector_v, q2_collector_v],
-                ['V(Q1_collector)', 'V(Q2_collector)'],
-                plot_title="Astable Multivibrator Oscillation"
-            )
-        except Exception as e:
-            print(f"Golden waveform comparison: {e}")
-            # Don't fail the test on golden file creation
-            if "created" not in str(e):
-                raise
+        self.assert_waveform_matches_golden(
+            "astable_multivibrator.csv",
+            times_ms,
+            [q1_collector_v, q2_collector_v],
+            ['V(Q1_collector)', 'V(Q2_collector)'],
+            plot_title="Astable Multivibrator Oscillation"
+        )
 
         print("✅ End-to-end subcircuit simulation test completed successfully!")
 

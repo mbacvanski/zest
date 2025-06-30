@@ -11,7 +11,6 @@ from zest import Circuit, VoltageSource, SubCircuit
 from zest.simulation import check_simulation_requirements
 from tests.waveform_test_framework import WaveformTestMixin
 from tests.golden_test_framework import GoldenTestMixin
-from tests.unified_plotting_mixin import UnifiedPlottingMixin
 from tests.simple_test_helpers import (
     create_rc_stage_definition, 
     create_rc_stage_with_custom_resistor_definition,

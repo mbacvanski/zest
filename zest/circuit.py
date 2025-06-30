@@ -404,19 +404,11 @@ class CircuitRoot(NetlistBlock):
                 lines.append(model_text)
                 lines.append("")
 
-        # 5. Find and write all unique .SUBCKT definitions.
-        unique_definitions = {}  # Use dict to track by name for deduplication
-        for component in self.components:
-            if isinstance(component, (SubCircuit, SubCircuitInst)):
-                definition = component.definition
-                # Only add if we haven't seen this definition name before
-                if definition.name not in unique_definitions:
-                    unique_definitions[definition.name] = definition
-        
-        # Filter out external-only subcircuits (defined in .INCLUDE files)
+        # 5. Use the recursively collected subcircuit definitions.
+        # Remove the main circuit itself and filter out external-only subcircuits
         internal_definitions = {
-            name: definition for name, definition in unique_definitions.items()
-            if not getattr(definition, '_is_external_only', False)
+            name: definition for name, definition in scanned_definitions.items()
+            if name != self.name and not getattr(definition, '_is_external_only', False)
         }
         
         if internal_definitions:
