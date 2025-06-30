@@ -163,44 +163,35 @@ class TestCircuitIntegrationMethods(unittest.TestCase):
     
     def test_operating_point_method(self):
         """Test circuit operating point simulation method."""
-        try:
-            result = self.circuit.simulate_operating_point()
-            # If it succeeds, result should be a SimulatedCircuit object
-            self.assertIsNotNone(result)
-            self.assertIsInstance(result, SimulatedCircuit)
-        except Exception as e:
-            # If simulation fails, that's OK for this test
-            self.assertIsInstance(e, Exception)
+        result = self.circuit.simulate_operating_point()
+        # If it succeeds, result should be a SimulatedCircuit object
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, SimulatedCircuit)
     
     def test_dc_sweep_method(self):
         """Test circuit DC sweep simulation method."""
-        try:
-            result = self.circuit.simulate_dc_sweep("V1", 0, 5, 0.1)
-            self.assertIsNotNone(result)
-            self.assertIsInstance(result, SimulatedCircuit)
-        except Exception as e:
-            # If simulation fails, that's OK for this test
-            self.assertIsInstance(e, Exception)
+        result = self.circuit.simulate_dc_sweep(self.vs, 0, 5, 0.1)
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, SimulatedCircuit)
+    
+    def test_dc_sweep_method_invalid_source(self):
+        """Test DC sweep with a source not in the circuit."""
+        # Create a component that is not part of the circuit
+        rogue_vs = VoltageSource(1.0)
+        with self.assertRaises(ValueError):
+            self.circuit.simulate_dc_sweep(rogue_vs, 0, 5, 0.1)
     
     def test_ac_analysis_method(self):
         """Test circuit AC analysis simulation method."""
-        try:
-            result = self.circuit.simulate_ac(start_freq=1, stop_freq=1e6, points_per_decade=10)
-            self.assertIsNotNone(result)
-            self.assertIsInstance(result, SimulatedCircuit)
-        except Exception as e:
-            # If simulation fails, that's OK for this test
-            self.assertIsInstance(e, Exception)
+        result = self.circuit.simulate_ac(start_freq=1, stop_freq=1e6, points_per_decade=10)
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, SimulatedCircuit)
     
     def test_transient_method(self):
         """Test circuit transient simulation method."""
-        try:
-            result = self.circuit.simulate_transient(step_time=1e-5, end_time=1e-3)
-            self.assertIsNotNone(result)
-            self.assertIsInstance(result, SimulatedCircuit)
-        except Exception as e:
-            # If simulation fails, that's OK for this test
-            self.assertIsInstance(e, Exception)
+        result = self.circuit.simulate_transient(step_time=1e-5, end_time=1e-3)
+        self.assertIsNotNone(result)
+        self.assertIsInstance(result, SimulatedCircuit)
 
 
 class TestSimulatedCircuit(unittest.TestCase):
@@ -310,7 +301,7 @@ class TestSimulatedCircuit(unittest.TestCase):
     def test_get_sweep_variable(self):
         """Test getting sweep variable from DC sweep analysis."""
         try:
-            result = self.circuit.simulate_dc_sweep("VS", 0, 5, 0.1)
+            result = self.circuit.simulate_dc_sweep(self.vs, 0, 5, 0.1)
             sweep_var = result.get_sweep_variable()
             
             if sweep_var is not None:

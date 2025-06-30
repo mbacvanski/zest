@@ -2,9 +2,10 @@
 Circuit class for representing and manipulating electronic circuits as graphs.
 """
 
-from .components import gnd
+from .components import gnd, Component
 from abc import ABC, abstractmethod
 from typing import Callable, Iterable, Mapping
+from .simulation import SpicelibBackend
 
 # No global circuit registry - components must be explicitly added to circuits
 
@@ -157,7 +158,7 @@ class NetlistBlock(ABC):
         Include external SPICE model definitions in this circuit.
         
         Usage patterns:
-        - For subcircuits: Include only the internal model content (no .SUBCKT wrapper needed)
+        - For subcircuits: Include only the internal content (no .SUBCKT wrapper needed)
         - For main circuits: Include complete .SUBCKT definitions for reusable models
         
         Args:
@@ -539,7 +540,6 @@ class CircuitRoot(NetlistBlock):
             SimulatedCircuit: Simulation results
         """
         if backend is None:
-            from .simulation import SpicelibBackend
             backend = SpicelibBackend()
         
         netlist = self.compile_to_spice()
@@ -551,40 +551,40 @@ class CircuitRoot(NetlistBlock):
             cleanup=cleanup
         )
     
-    def simulate_dc_sweep(self, source_name, start, stop, step, backend=None, temperature=25, cleanup="silent"):
+    def simulate_dc_sweep(self, source_component: Component, start: float, stop: float, step: float, backend=None, temperature=25, cleanup="silent"):
         """
-        Run DC sweep analysis.
+        Run a DC sweep analysis.
         
         Args:
-            source_name: Name of the voltage/current source to sweep
-            start: Starting value for the sweep
-            stop: Ending value for the sweep  
-            step: Step size for the sweep
-            backend: Simulation backend (defaults to SpicelibBackend)
-            temperature: Simulation temperature in Celsius (default: 25)
-            cleanup: Temporary file cleanup mode (default: "silent")
-                - "silent": Clean up files silently 
-                - "verbose": Clean up files with debug output
-                - "keep": Keep files for debugging
+            source_component: The voltage/current source component to sweep.
+            start: Sweep start value
+            stop: Sweep stop value
+            step: Sweep step value
+            backend: Simulation backend (default: SpicelibBackend)
+            temperature: Simulation temperature (Celsius)
+            cleanup: Temporary file cleanup mode
             
         Returns:
             SimulatedCircuit: Simulation results
         """
-        if backend is None:
-            from .simulation import SpicelibBackend
-            backend = SpicelibBackend()
+        # Validate that the source component is part of this circuit
+        if source_component not in self.components:
+            raise ValueError(f"DC sweep source '{source_component}' is not in the circuit.")
+            
+        # Get the final, compiled name of the source component
+        final_source_name = self.get_component_name(source_component)
         
-        netlist = self.compile_to_spice()
+        backend = backend or SpicelibBackend()
         return backend.run(
-            netlist,
-            analyses=["dc"],
-            temperature=temperature,
-            circuit=self,
-            source_name=source_name,
+            netlist=self.compile_to_spice(),
+            analyses=['dc'],
+            source_name=final_source_name,
             start=start,
             stop=stop,
             step=step,
-            cleanup=cleanup
+            temperature=temperature,
+            cleanup=cleanup,
+            circuit=self  # Pass self for result parsing
         )
     
     def simulate_ac(self, start_freq=1, stop_freq=1e6, points_per_decade=10, backend=None, temperature=25, cleanup="silent"):
@@ -606,7 +606,6 @@ class CircuitRoot(NetlistBlock):
             SimulatedCircuit: Simulation results
         """
         if backend is None:
-            from .simulation import SpicelibBackend
             backend = SpicelibBackend()
         
         netlist = self.compile_to_spice()
@@ -640,7 +639,6 @@ class CircuitRoot(NetlistBlock):
             SimulatedCircuit: Simulation results
         """
         if backend is None:
-            from .simulation import SpicelibBackend
             backend = SpicelibBackend()
         
         netlist = self.compile_to_spice()

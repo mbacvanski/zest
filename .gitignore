@@ -1,3 +1,6 @@
+temp_spice_sim/
+temp_spicelib/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

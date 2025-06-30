@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from zest.circuit import Circuit, SubCircuitDef
-from zest.components import Resistor, VoltageSource, Terminal, SubCircuit, PiecewiseLinearVoltageSource
+from zest.components import Resistor, VoltageSource, Terminal, SubCircuit
 
 
 def create_saturating_opamp_subcircuit(vdd_val=5.0, vss_val=-5.0, gain=1e5):
@@ -41,8 +41,8 @@ def demonstrate_schmitt_trigger():
     circuit = Circuit("OpAmpSchmittTrigger")
 
     # Op-amp parameters
-    vdd_val = 5.0
-    vss_val = -5.0
+    vdd_val = 2.0
+    vss_val = 0
 
     # Create the saturating op-amp definition
     opamp_def = create_saturating_opamp_subcircuit(vdd_val=vdd_val, vss_val=vss_val)
@@ -51,12 +51,7 @@ def demonstrate_schmitt_trigger():
     opamp = SubCircuit(opamp_def, "U1")
     r1 = Resistor(10e3, "R1")  # Feedback resistor
     r2 = Resistor(10e3, "R2")  # Resistor to ground
-    
-    # Use a PWL source for a triangular wave input
-    time_points = [0, 1e-3, 3e-3, 4e-3]
-    voltage_points = [-6, 6, -6, -6]
-    time_voltage_pairs = list(zip(time_points, voltage_points))
-    vin = PiecewiseLinearVoltageSource(time_voltage_pairs, "Vin")
+    vin = VoltageSource(0, "Vin")
 
     # Connect the Schmitt trigger components (inverting configuration)
     # Input signal to the inverting input
@@ -70,50 +65,48 @@ def demonstrate_schmitt_trigger():
     circuit.wire(r2.n2, circuit.gnd)
 
     # --- Simulation ---
-    print("Running transient simulation...")
-    tran_results = circuit.simulate_transient(step_time=1e-5, end_time=4e-3)
+    # Perform a bidirectional DC sweep to show hysteresis
+    print("Running DC sweeps...")
+    sweep_start = vss_val - 1
+    sweep_stop = vdd_val + 1
+    rising_sweep = circuit.simulate_dc_sweep(
+        source_component=vin, start=sweep_start, stop=sweep_stop, step=0.01
+    )
+    falling_sweep = circuit.simulate_dc_sweep(
+        source_component=vin, start=sweep_stop, stop=sweep_start, step=-0.01
+    )
     
     # --- Plotting ---
     fig, ax = plt.subplots(figsize=(10, 6))
 
-    # For transient analysis, the time vector is retrieved with its own method
-    time_t = tran_results.get_time_vector()
-    if time_t is None:
-        raise ValueError("Time vector not found in simulation results.")
-        
-    vin_t = tran_results.get_node_voltage(vin.pos)
-    vout_t = tran_results.get_node_voltage(opamp.OUT)
-
-    # Split data for plotting rising and falling sweeps
-    # The input triangular wave peaks at 1ms and completes its fall at 3ms.
-    peak_time = 1e-3
-    fall_end_time = 3e-3
-    
-    rising_indices = np.where(time_t <= peak_time)[0]
-    falling_indices = np.where((time_t > peak_time) & (time_t <= fall_end_time))[0]
+    # Extract DC sweep results
+    vin_rising = rising_sweep.get_sweep_variable()
+    vout_rising = rising_sweep.get_node_voltage(opamp.OUT)
+    vin_falling = falling_sweep.get_sweep_variable()
+    vout_falling = falling_sweep.get_node_voltage(opamp.OUT)
 
     # Plot rising and falling sweeps separately
-    ax.plot(vin_t[rising_indices], vout_t[rising_indices], "b-", label="Vin Sweeping Up")
-    ax.plot(vin_t[falling_indices], vout_t[falling_indices], "r-", label="Vin Sweeping Down")
+    ax.plot(vin_rising, vout_rising, "b-", label="Vin Sweeping Up")
+    ax.plot(vin_falling, vout_falling, "r-", label="Vin Sweeping Down")
 
     # Add arrows to show the direction of the transfer function
     # Arrow for the rising part (Vin increasing)
-    idx1_rise = int(len(rising_indices) * 0.45)
-    idx2_rise = int(len(rising_indices) * 0.55)
+    idx1_rise = int(len(vin_rising) * 0.48)
+    idx2_rise = int(len(vin_rising) * 0.52)
     ax.annotate("",
-                xy=(vin_t[rising_indices[idx2_rise]], vout_t[rising_indices[idx2_rise]]), 
-                xytext=(vin_t[rising_indices[idx1_rise]], vout_t[rising_indices[idx1_rise]]),
+                xy=(vin_rising[idx2_rise], vout_rising[idx2_rise]), 
+                xytext=(vin_rising[idx1_rise], vout_rising[idx1_rise]),
                 arrowprops=dict(arrowstyle="->", color="b", lw=2.5))
 
     # Arrow for the falling part (Vin decreasing)
-    idx1_fall = int(len(falling_indices) * 0.45)
-    idx2_fall = int(len(falling_indices) * 0.55)
+    idx1_fall = int(len(vin_falling) * 0.48)
+    idx2_fall = int(len(vin_falling) * 0.52)
     ax.annotate("",
-                xy=(vin_t[falling_indices[idx2_fall]], vout_t[falling_indices[idx2_fall]]), 
-                xytext=(vin_t[falling_indices[idx1_fall]], vout_t[falling_indices[idx1_fall]]),
+                xy=(vin_falling[idx2_fall], vout_falling[idx2_fall]), 
+                xytext=(vin_falling[idx1_fall], vout_falling[idx1_fall]),
                 arrowprops=dict(arrowstyle="->", color="r", lw=2.5))
 
-    ax.set_title("Op-Amp Schmitt Trigger Hysteresis (Transient Analysis)")
+    ax.set_title("Op-Amp Schmitt Trigger Hysteresis (DC Sweep)")
     ax.set_xlabel("Input Voltage (V)")
     ax.set_ylabel("Output Voltage (V)")
     ax.grid(True)

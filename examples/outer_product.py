@@ -115,11 +115,8 @@ def demo_comparator_dc_sweep_simulation():
     # Use zest's DC sweep functionality
     print("Running DC sweep of VIN1 from 0.5V to 1.1V...")
     
-    # Get the component name for the voltage source
-    vin1_name = circuit.get_component_name(vin1_src)
-    
     simulated_circuit = circuit.simulate_dc_sweep(
-        source_name=vin1_name,
+        source_component=vin1_src,
         start=0.5,
         stop=1.1, 
         step=0.001

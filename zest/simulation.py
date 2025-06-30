@@ -240,7 +240,7 @@ class SpicelibBackend(SimulatorBackend):
                 lines.append(f'.ac dec {points_per_decade} {start_freq} {end_freq}')
             elif analysis == 'dc':
                 # DC sweep analysis
-                source = kwargs.get('source_name', kwargs.get('source', 'V1'))
+                source = kwargs['source_name']
                 start = kwargs.get('start', 0)
                 stop = kwargs.get('stop', 5)
                 step = kwargs.get('step', 0.1)
