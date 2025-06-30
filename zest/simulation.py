@@ -220,36 +220,7 @@ class SpicelibBackend(SimulatorBackend):
         lines.append('.end')
         return '\n'.join(lines)
     
-    def get_node_voltage(self, result, node_name: str):
-        """
-        Extract node voltage from spicelib simulation results.
-        
-        Args:
-            result: SimulatedCircuit from spicelib simulation
-            node_name: Name of the node (e.g., 'N1', 'N2')
-            
-        Returns:
-            numpy array of voltage values or single voltage value
-        """
-        if not hasattr(result, 'raw_data') or not result.raw_data:
-            return 0.0
-        
-        # Try different node name formats
-        possible_names = [
-            f'v({node_name.lower()})',  # v(n1)
-            f'V({node_name.upper()})',  # V(N1) 
-            f'v({node_name})',          # v(N1)
-            node_name.lower(),          # n1
-            node_name.upper()           # N1
-        ]
-        
-        for name in possible_names:
-            if name in result.trace_names:
-                trace = result.raw_data.get_trace(name)
-                return trace.data
-        
-        # If no trace found, return 0.0 (fallback)
-        return 0.0
+
 
 
 class SimulatedCircuit:
@@ -261,44 +232,32 @@ class SimulatedCircuit:
     calculated for that component.
     """
     
-    def __init__(self, circuit=None, analysis_type=None, pyspice_results=None, **spicelib_kwargs):
+    def __init__(self, circuit=None, analysis_type=None, **spicelib_kwargs):
         self.circuit = circuit
         self.analysis_type = analysis_type
-        self.pyspice_results = pyspice_results
         
         # Store the raw simulation results
         self.nodes = {}
         self.branches = {}
         
-        # Support spicelib-style initialization
+        # SpiceLib initialization
         if 'time' in spicelib_kwargs:
             self.time = spicelib_kwargs['time']
         if 'raw_data' in spicelib_kwargs:
             self.raw_data = spicelib_kwargs['raw_data']
         if 'trace_names' in spicelib_kwargs:
             self.trace_names = spicelib_kwargs['trace_names']
-            # Parse spicelib results to populate nodes dictionary
+            # Parse spicelib results to populate nodes and branches dictionaries
             self._parse_spicelib_results()
-        
-        if pyspice_results is not None:
-            self._parse_results(pyspice_results)
     
-    def _parse_results(self, results):
-        """Parse PySpice results into more accessible format."""
-        if hasattr(results, 'nodes'):
-            for node_name, node_value in results.nodes.items():
-                self.nodes[str(node_name)] = node_value
-        
-        if hasattr(results, 'branches'):
-            for branch_name, branch_value in results.branches.items():
-                self.branches[str(branch_name)] = branch_value
+
     
     def _parse_spicelib_results(self):
-        """Parse spicelib results and populate nodes dictionary."""
+        """Parse spicelib results and populate nodes and branches dictionaries."""
         if not hasattr(self, 'raw_data') or not self.raw_data or not hasattr(self, 'trace_names'):
             return
         
-        # Extract node voltages from spicelib raw data
+        # Extract node voltages and branch currents from spicelib raw data
         for trace_name in self.trace_names:
             # Look for voltage traces (node voltages)
             if trace_name.startswith('v(') and trace_name.endswith(')'):
@@ -320,6 +279,26 @@ class SimulatedCircuit:
                         self.nodes[node_name] = trace.data
                 except Exception:
                     continue
+            # Look for current traces (branch currents)
+            elif trace_name.startswith('i(') and trace_name.endswith(')'):
+                # Extract component name from i(component_name) format
+                component_name = trace_name[2:-1]  # Remove 'i(' and ')'
+                try:
+                    trace = self.raw_data.get_trace(trace_name)
+                    if trace and hasattr(trace, 'data'):
+                        self.branches[component_name] = trace.data
+                except Exception:
+                    # If we can't get the trace, skip it
+                    continue
+            elif trace_name.startswith('I(') and trace_name.endswith(')'):
+                # Handle uppercase version I(component_name)
+                component_name = trace_name[2:-1]  # Remove 'I(' and ')'
+                try:
+                    trace = self.raw_data.get_trace(trace_name)
+                    if trace and hasattr(trace, 'data'):
+                        self.branches[component_name] = trace.data
+                except Exception:
+                    continue
     
     def get_component_results(self, component):
         """
@@ -339,10 +318,10 @@ class SimulatedCircuit:
     
     def _get_node_voltage_value(self, node_name):
         """
-        Get the voltage value for a node name, handling both PySpice and spicelib formats.
+        Get the voltage value for a node name using deterministic naming.
         
         Args:
-            node_name: The SPICE node name (e.g., 'N1', 'N2')
+            node_name: The SPICE node name (e.g., 'N1', 'N2', 'gnd')
             
         Returns:
             float or array: The voltage value(s) at the node
@@ -351,130 +330,101 @@ class SimulatedCircuit:
         if node_name == 'gnd':
             return 0.0
         
-        # For spicelib backend, try to get trace directly
         if hasattr(self, 'raw_data') and self.raw_data and hasattr(self, 'trace_names'):
-            # Try different node name formats for spicelib
-            possible_names = [
-                f'v({node_name.lower()})',  # v(n1), v(n2)
-                f'V({node_name.upper()})',  # V(N1), V(N2)
-                f'v({node_name})',          # v(N1), v(N2)
-                node_name.lower(),          # n1, n2
-                node_name.upper()           # N1, N2
-            ]
-            
-            for name in possible_names:
-                if name in self.trace_names:
-                    trace = self.raw_data.get_trace(name)
-                    return trace.data
-        
-        # Fall back to PySpice method for PySpice backend
-        # First try exact match
-        if node_name in self.nodes:
-            node_value = self.nodes[node_name]
-            return self._extract_value(node_value)
-        
-        # Try case-insensitive match
-        for sim_node_name, sim_node_value in self.nodes.items():
-            if node_name.lower() == sim_node_name.lower():
-                return self._extract_value(sim_node_value)
-        
-        # If no match found, assume ground (0V)
-        return 0.0
+            # Use deterministic naming: v(node_name.lower())
+            trace_name = f'v({node_name.lower()})'
+            if trace_name in self.trace_names:
+                trace = self.raw_data.get_trace(trace_name)
+                return trace.data
+                
+        raise ValueError(f"Node {node_name} not found in simulation results")
     
     def _get_branch_current_value(self, branch_name):
         """
-        Get the current value for a branch name, handling case sensitivity.
+        Get the current value for a branch name using deterministic naming.
         
         Args:
-            branch_name: The SPICE branch name
+            branch_name: The SPICE branch name (component name in lowercase)
             
         Returns:
             float or array or None: The current value(s) or None if not found
         """
-        # First try exact match
+        # Use deterministic naming: component_name.lower()
         if branch_name in self.branches:
             branch_value = self.branches[branch_name]
             return self._extract_value(branch_value)
         
-        # Try case-insensitive match
-        for sim_branch_name, sim_branch_value in self.branches.items():
-            if branch_name.lower() == sim_branch_name.lower():
-                return self._extract_value(sim_branch_value)
-        
         # No match found
         return None
     
-    def _extract_value(self, node_value):
-        """Extract numeric value from PySpice waveform or other objects."""
-        # Handle PySpice WaveForm objects with units
-        if hasattr(node_value, 'as_ndarray'):
-            # This is a PySpice UnitValues/WaveForm object
-            try:
-                # Extract the raw numpy array without units
-                raw_array = node_value.as_ndarray()
-                
-                # For DC analysis, return the scalar value if it's just one point
-                if hasattr(raw_array, 'shape') and len(raw_array.shape) == 0:
-                    # It's a scalar wrapped in an array
-                    return float(raw_array.item()) if hasattr(raw_array, 'item') else float(raw_array)
-                elif len(raw_array) == 1:
-                    # Single value array - extract the scalar
-                    return float(raw_array[0])
-                else:
-                    # Multiple values - return as numpy array for transient/AC analysis
-                    return np.array(raw_array, dtype=float)
-            except:
-                # Fallback for PySpice objects
-                try:
-                    # Try to convert to float directly
-                    return float(node_value)
-                except:
-                    # Last resort: return the raw value
-                    return node_value
+    def get_component_current(self, component):
+        """
+        Get the current through a specific component.
         
-        # Handle regular numpy arrays and array-like objects
-        elif hasattr(node_value, 'shape') and hasattr(node_value, '__getitem__'):
-            try:
-                # For DC analysis, return the scalar value if it's just one point
-                if hasattr(node_value, 'shape') and len(node_value.shape) == 0:
-                    # It's a scalar wrapped in an array
-                    return float(node_value.item()) if hasattr(node_value, 'item') else float(node_value)
-                elif len(node_value) == 1:
-                    # Single value array - extract the scalar
-                    return float(node_value[0])
-                else:
-                    # Multiple values - return as numpy array for transient/AC analysis
-                    return np.array([float(val) for val in node_value])
-            except:
-                # Fallback: try to extract single value or return array
-                try:
-                    if hasattr(node_value, 'item'):
-                        return float(node_value.item())
-                    elif len(node_value) == 1:
-                        return float(node_value[0])
-                    else:
-                        return np.array(node_value)
-                except:
-                    return np.array(node_value)
+        Args:
+            component: The component instance
+            
+        Returns:
+            float or array: The current value(s) through the component
+        """
+        if self.circuit is None:
+            raise ValueError("Cannot get component current without circuit reference")
+        
+        if component not in self.circuit.components:
+            raise ValueError(f"Component {component} is not part of this circuit")
+        
+        # Get the component's SPICE name and use deterministic branch naming
+        component_name = self.circuit.get_component_name(component)
+        branch_name = component_name.lower()
+        
+        current_value = self._get_branch_current_value(branch_name)
+        if current_value is not None:
+            return current_value
+        else:
+            raise ValueError(f"Current for component {component_name} not found in simulation results")
+    
+    def get_terminal_current(self, terminal):
+        """
+        Get the current flowing into a specific terminal.
+        
+        This determines which component the terminal belongs to and returns
+        the current through that component.
+        
+        Args:
+            terminal: The terminal object
+            
+        Returns:
+            float or array: The current value(s) flowing into the terminal
+        """
+        if self.circuit is None:
+            raise ValueError("Cannot get terminal current without circuit reference")
+        
+        # Find which component this terminal belongs to
+        for component in self.circuit.components:
+            for terminal_name, comp_terminal in component.get_terminals():
+                if comp_terminal is terminal:
+                    return self.get_component_current(component)
+        
+        raise ValueError(f"Terminal {terminal} not found in any circuit component")
+    
+    def _extract_value(self, node_value):
+        """Extract numeric value from SpiceLib simulation data."""
+        # Handle numpy arrays from SpiceLib
+        if hasattr(node_value, 'shape') and hasattr(node_value, '__getitem__'):
+            # For DC analysis, return scalar if single value
+            if len(node_value) == 1:
+                return float(node_value[0])
+            else:
+                # Multiple values - return as numpy array for transient/AC analysis
+                return np.array(node_value, dtype=float)
         elif hasattr(node_value, '__float__'):
-            try:
-                return float(node_value)
-            except:
-                # Handle the numpy array scalar deprecation warning
-                if hasattr(node_value, 'item'):
-                    return float(node_value.item())
-                else:
-                    return 0.0
+            return float(node_value)
         elif hasattr(node_value, '__iter__') and not isinstance(node_value, str):
             # For other array-like objects
-            try:
-                # For DC analysis, if it's a single value, extract it
-                if len(node_value) == 1:
-                    return float(node_value[0])
-                else:
-                    return np.array(node_value) if hasattr(np, 'array') else list(node_value)
-            except:
-                return node_value
+            if len(node_value) == 1:
+                return float(node_value[0])
+            else:
+                return np.array(node_value)
         else:
             return node_value
     
@@ -488,44 +438,11 @@ class SimulatedCircuit:
         Returns:
             Voltage value at the terminal
         """
-        # Handle spicelib backend case (circuit is None, use raw_data directly)
-        if hasattr(self, 'raw_data') and self.raw_data and self.circuit is None:
-            # For spicelib, we need to figure out the node name differently
-            # For now, try common node naming patterns
-            possible_names = []
-            
-            # If terminal has a string representation, try that
-            if hasattr(terminal, '__str__'):
-                term_str = str(terminal)
-                if 'N1' in term_str or 'N2' in term_str or 'N3' in term_str:
-                    # Extract node number from terminal string
-                    import re
-                    match = re.search(r'N(\d+)', term_str)
-                    if match:
-                        node_num = match.group(1)
-                        possible_names.extend([f'v(n{node_num})', f'V(N{node_num})', f'n{node_num}', f'N{node_num}'])
-            
-            # Try different node name formats
-            for name in possible_names:
-                if name in self.trace_names:
-                    trace = self.raw_data.get_trace(name)
-                    return trace.data
-            
-            # Fallback: try to match by index or pattern
-            for trace_name in self.trace_names:
-                if 'v(' in trace_name.lower() and ('n1' in trace_name.lower() or 'n2' in trace_name.lower()):
-                    trace = self.raw_data.get_trace(trace_name)
-                    return trace.data
-            
-            return 0.0
+        if self.circuit is None:
+            raise ValueError("Cannot get node voltage without circuit reference")
         
-        # Handle PySpice backend case (circuit is available)
-        elif self.circuit is not None:
-            node_name = self.circuit.get_spice_node_name(terminal)
-            return self._get_node_voltage_value(node_name)
-        
-        else:
-            return 0.0
+        node_name = self.circuit.get_spice_node_name(terminal)
+        return self._get_node_voltage_value(node_name)
     
     def list_components(self):
         """List all components in the circuit."""
@@ -539,24 +456,12 @@ class SimulatedCircuit:
         Get the time vector from transient analysis results.
         
         Returns:
-            numpy.ndarray: Time values, or None if not available
+            numpy.ndarray: Time values, or None if not transient analysis
         """
         if self.analysis_type != "Transient Analysis":
             return None
         
-        # For spicelib backend, time is stored directly
-        if hasattr(self, 'time') and self.time is not None:
-            return self.time
-        
-        # Legacy PySpice support (for backward compatibility)
-        if hasattr(self, 'pyspice_results') and self.pyspice_results is not None:
-            # Try to extract time vector from PySpice results
-            if hasattr(self.pyspice_results, 'time'):
-                return self._extract_value(self.pyspice_results.time)
-            elif hasattr(self.pyspice_results, 'abscissa'):
-                return self._extract_value(self.pyspice_results.abscissa)
-        
-        return None
+        return getattr(self, 'time', None)
 
 
 class CircuitSimulator:

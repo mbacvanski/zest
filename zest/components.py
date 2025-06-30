@@ -156,12 +156,13 @@ class VoltageSource(Component):
     
     def _add_derived_results(self, results, simulated_circuit):
         """Add voltage source specific results: current and voltage across."""
-        # Look for current through the voltage source
-        component_name = simulated_circuit.circuit.get_component_name(self)
-        source_current_key = f"v{component_name.lower()}"
-        current_value = simulated_circuit._get_branch_current_value(source_current_key)
-        if current_value is not None:
+        # Use the new deterministic current method
+        try:
+            current_value = simulated_circuit.get_component_current(self)
             results['current'] = current_value
+        except ValueError:
+            # Current not available in simulation results
+            pass
         
         # Calculate voltage across the source
         terminal_voltages = results['terminal_voltages']

@@ -103,11 +103,7 @@ def simulate_and_compare(circuit, col_amplifiers, theoretical_outputs):
     
     for j, opamp in enumerate(col_amplifiers):
         # Extract simulated voltage
-        voltage = results.get_node_voltage(opamp.out)
-        if hasattr(voltage, 'item'):
-            voltage = float(voltage.item())
-        else:
-            voltage = float(voltage)
+        voltage = float(results.get_node_voltage(opamp.out).item())
         
         simulated_outputs.append(voltage)
         
