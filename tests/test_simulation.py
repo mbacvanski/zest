@@ -291,7 +291,7 @@ class TestBranchCurrentMethods(unittest.TestCase):
         
         with self.assertRaises(ValueError) as cm:
             sim_circuit.get_component_current(self.vs)
-        self.assertIn("Current for component Vsource not found", str(cm.exception))
+        self.assertIn("Current for component Vsource not available", str(cm.exception))
         
     def test_get_component_current_success(self):
         """Test successful current retrieval for components."""

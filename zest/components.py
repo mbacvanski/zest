@@ -166,10 +166,14 @@ class VoltageSource(Component):
         
         # Calculate voltage across the source
         terminal_voltages = results['terminal_voltages']
-        v_pos = terminal_voltages.get('pos', 0.0)
-        v_neg = terminal_voltages.get('neg', 0.0)
-        if isinstance(v_pos, (int, float)) and isinstance(v_neg, (int, float)):
-            results['voltage_across'] = v_pos - v_neg
+        v_pos_raw = terminal_voltages.get('pos', 0.0)
+        v_neg_raw = terminal_voltages.get('neg', 0.0)
+        
+        # Extract scalar values from simulation data (handles both scalars and arrays)
+        v_pos = simulated_circuit._extract_value(v_pos_raw)
+        v_neg = simulated_circuit._extract_value(v_neg_raw)
+        
+        results['voltage_across'] = v_pos - v_neg
 
 
 class Resistor(Component):
@@ -202,16 +206,19 @@ class Resistor(Component):
     def _add_derived_results(self, results, simulated_circuit):
         """Add resistor specific results: voltage across, current, and power."""
         terminal_voltages = results['terminal_voltages']
-        v_n1 = terminal_voltages.get('n1', 0.0)
-        v_n2 = terminal_voltages.get('n2', 0.0)
+        v_n1_raw = terminal_voltages.get('n1', 0.0)
+        v_n2_raw = terminal_voltages.get('n2', 0.0)
         
-        if isinstance(v_n1, (int, float)) and isinstance(v_n2, (int, float)):
-            voltage_across = v_n1 - v_n2
-            results['voltage_across'] = voltage_across
-            # Calculate current using Ohm's law
-            results['current'] = voltage_across / self.resistance
-            # Calculate power dissipation
-            results['power'] = voltage_across**2 / self.resistance
+        # Extract scalar values from simulation data (handles both scalars and arrays)
+        v_n1 = simulated_circuit._extract_value(v_n1_raw)
+        v_n2 = simulated_circuit._extract_value(v_n2_raw)
+        
+        voltage_across = v_n1 - v_n2
+        results['voltage_across'] = voltage_across
+        # Calculate current using Ohm's law
+        results['current'] = voltage_across / self.resistance
+        # Calculate power dissipation
+        results['power'] = voltage_across**2 / self.resistance
 
 
 class Capacitor(Component):
@@ -244,11 +251,14 @@ class Capacitor(Component):
     def _add_derived_results(self, results, simulated_circuit):
         """Add capacitor specific results: voltage across."""
         terminal_voltages = results['terminal_voltages']
-        v_pos = terminal_voltages.get('pos', 0.0)
-        v_neg = terminal_voltages.get('neg', 0.0)
+        v_pos_raw = terminal_voltages.get('pos', 0.0)
+        v_neg_raw = terminal_voltages.get('neg', 0.0)
         
-        if isinstance(v_pos, (int, float)) and isinstance(v_neg, (int, float)):
-            results['voltage_across'] = v_pos - v_neg
+        # Extract scalar values from simulation data (handles both scalars and arrays)
+        v_pos = simulated_circuit._extract_value(v_pos_raw)
+        v_neg = simulated_circuit._extract_value(v_neg_raw)
+        
+        results['voltage_across'] = v_pos - v_neg
 
 
 class Inductor(Component):
@@ -281,11 +291,14 @@ class Inductor(Component):
     def _add_derived_results(self, results, simulated_circuit):
         """Add inductor specific results: voltage across."""
         terminal_voltages = results['terminal_voltages']
-        v_n1 = terminal_voltages.get('n1', 0.0)
-        v_n2 = terminal_voltages.get('n2', 0.0)
+        v_n1_raw = terminal_voltages.get('n1', 0.0)
+        v_n2_raw = terminal_voltages.get('n2', 0.0)
         
-        if isinstance(v_n1, (int, float)) and isinstance(v_n2, (int, float)):
-            results['voltage_across'] = v_n1 - v_n2
+        # Extract scalar values from simulation data (handles both scalars and arrays)
+        v_n1 = simulated_circuit._extract_value(v_n1_raw)
+        v_n2 = simulated_circuit._extract_value(v_n2_raw)
+        
+        results['voltage_across'] = v_n1 - v_n2
 
 
 class SubCircuit(Component):

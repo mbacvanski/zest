@@ -361,6 +361,10 @@ class SimulatedCircuit:
         """
         Get the current through a specific component.
         
+        First tries to get SPICE current (for active components like voltage sources),
+        then falls back to calculated current from component's derived results
+        (for passive components like resistors).
+        
         Args:
             component: The component instance
             
@@ -373,15 +377,24 @@ class SimulatedCircuit:
         if component not in self.circuit.components:
             raise ValueError(f"Component {component} is not part of this circuit")
         
-        # Get the component's SPICE name and use deterministic branch naming
+        # First try to get SPICE current (for active components)
         component_name = self.circuit.get_component_name(component)
         branch_name = component_name.lower()
         
         current_value = self._get_branch_current_value(branch_name)
         if current_value is not None:
             return current_value
-        else:
-            raise ValueError(f"Current for component {component_name} not found in simulation results")
+        
+        # Fall back to calculated current from component's derived results
+        # (for passive components like resistors where SPICE doesn't provide current)
+        try:
+            component_results = self.get_component_results(component)
+            if 'current' in component_results:
+                return component_results['current']
+        except Exception:
+            pass
+        
+        raise ValueError(f"Current for component {component_name} not available in simulation results or component calculations")
     
     def get_terminal_current(self, terminal):
         """

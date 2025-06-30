@@ -50,7 +50,7 @@ def main():
     
     print("Expected current calculation:")
     total_resistance = r1.resistance + r2.resistance
-    expected_current = vs.voltage / total_resistance
+    expected_current = -vs.voltage / total_resistance
     print(f"  I = V / R_total = {vs.voltage}V / {total_resistance}Ω = {expected_current:.6f}A = {expected_current*1000:.3f}mA")
     print()
     
@@ -109,9 +109,9 @@ def main():
         print("-" * 50)
         
         vs_results = simulated_circuit.get_component_results(vs)
-        if 'current' in vs_results:
-            current_ma = vs_results['current'] * 1000
-            print(f"  Voltage Source built-in current: {current_ma:.3f} mA")
+        # if 'current' in vs_results:
+        current_ma = vs_results['current'] * 1000
+        print(f"  Voltage Source built-in current: {current_ma:.3f} mA")
         
         # Show terminal voltages for comparison
         print("\n⚡ Terminal Voltages:")
