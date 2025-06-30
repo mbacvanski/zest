@@ -1,0 +1,9 @@
+* Circuit: Cascaded RC Filter
+
+VVIN N1 gnd DC 5.0
+RR1 N1 N2 1000
+CC1 N2 gnd 1e-06
+RR2 N2 N3 2000
+CC2 N3 gnd 5e-07
+
+.end

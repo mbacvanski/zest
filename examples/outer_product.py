@@ -1,76 +1,8 @@
 from zest.circuit import Circuit, SubCircuitDef
-from zest.components import Component, Terminal, SubCircuit
+from zest.components import Component, Terminal, SubCircuit, CurrentSource, ExternalSubCircuit
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-
-
-class CurrentSource(Component):
-    """DC current source component."""
-    
-    def __init__(self, current=1e-6, name=None):
-        self.current = current
-        super().__init__(name)
-        
-        # Create terminals - these are the nodes in the graph
-        self.pos = Terminal(self, "pos")
-        self.neg = Terminal(self, "neg")
-        
-        # Aliases for convenience
-        self.positive = self.pos
-        self.negative = self.neg
-    
-    def get_component_type_prefix(self):
-        return "I"
-    
-    def get_terminals(self):
-        return [('pos', self.pos), ('neg', self.neg)]
-    
-    def to_spice(self, mapper, *, forced_name=None):
-        """Convert to SPICE format using NodeMapper."""
-        pos_node = mapper.name_for(self.pos)
-        neg_node = mapper.name_for(self.neg)
-        return f"{forced_name or self.name} {pos_node} {neg_node} DC {self.current}"
-
-
-class ExternalSubCircuit(Component):
-    """
-    A subcircuit that references an external definition (from a library file).
-    This doesn't need a local definition - it just references the name.
-    """
-    def __init__(self, subckt_name, pin_names, name=None, **params):
-        super().__init__(name)
-        self.subckt_name = subckt_name
-        self.pin_names = pin_names
-        self.params = params  # Store parameters like W=2e-6, L=0.18e-6
-        
-        # Create terminals for each pin
-        self._terminals = {}
-        for pin_name in pin_names:
-            terminal = Terminal(self, pin_name)
-            self._terminals[pin_name] = terminal
-            setattr(self, pin_name, terminal)  # Allows access like mosfet.D, mosfet.G, etc.
-    
-    def get_component_type_prefix(self):
-        return "X"
-    
-    def get_terminals(self):
-        return list(self._terminals.items())
-    
-    def to_spice(self, mapper, *, forced_name=None):
-        """Generates the SPICE 'X' line for this external subcircuit instance."""
-        # Get node names in the order specified by pin_names
-        node_names = [mapper.name_for(self._terminals[pin_name]) for pin_name in self.pin_names]
-        
-        # Format parameters
-        param_str = ""
-        if self.params:
-            param_parts = []
-            for key, value in self.params.items():
-                param_parts.append(f"{key}={value}")
-            param_str = " " + " ".join(param_parts)
-        
-        return f"{forced_name or self.name} {' '.join(node_names)} {self.subckt_name}{param_str}"
 
 
 def create_comparator_subcircuit_def():
@@ -146,10 +78,7 @@ def create_comparator_test_circuit(vin1_voltage=0.9, vin2_voltage=0.8):
     
     # Create the test circuit
     test_circuit = Circuit("ComparatorTest")
-    
-    # Use relative path like in working test
-    test_circuit.add_include("examples/models/mosfets.lib")
-    
+        
     # Create comparator subcircuit definition
     comparator_def = create_comparator_subcircuit_def()
     

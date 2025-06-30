@@ -1,0 +1,9 @@
+* Circuit: Astable Multivibrator
+
+VVCC N1 gnd DC 5.0
+RR1 N1 N2 10000
+RR2 N1 N3 10000
+CC1 N2 gnd 1e-05
+CC2 N3 gnd 1e-05
+
+.end
