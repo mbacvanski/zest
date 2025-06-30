@@ -1,6 +1,6 @@
 * Circuit: Disconnected Test
 
-V1 V1_pos V1_neg DC 5.0
-R1 R1_n1 R1_n2 1000
+V1 N1 N2 DC 5.0
+R1 N3 N4 1000
 
 .end

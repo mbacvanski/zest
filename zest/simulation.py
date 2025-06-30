@@ -5,14 +5,386 @@ Simulation capabilities for Zest circuits using PySpice.
 import numpy as np
 from pathlib import Path
 import tempfile
+from abc import ABC, abstractmethod
 
 try:
     import PySpice.Logging.Logging as Logging
     from PySpice.Spice.Netlist import Circuit as PySpiceCircuit
+    from PySpice.Spice.NgSpice.Shared import NgSpiceShared
     from PySpice.Unit import *
     PYSPICE_AVAILABLE = True
 except ImportError:
     PYSPICE_AVAILABLE = False
+
+
+class SimulatorBackend(ABC):
+    """
+    Abstract base class for circuit simulation backends.
+    
+    This defines the interface that all simulation backends must implement.
+    """
+    
+    @abstractmethod
+    def run(self, netlist: str, analyses: list[str], **kwargs):
+        """
+        Run simulation analyses on a SPICE netlist.
+        
+        Args:
+            netlist: Complete SPICE netlist string
+            analyses: List of analysis types (e.g., ["op"], ["transient"], etc.)
+            **kwargs: Additional simulation parameters
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
+        pass
+
+
+class PySpiceBackend(SimulatorBackend):
+    """
+    PySpice-based simulation backend.
+    
+    This backend uses PySpice's SpiceParser to parse SPICE netlists
+    and run simulations.
+    """
+    
+    def __init__(self):
+        if not PYSPICE_AVAILABLE:
+            raise ImportError("PySpice is required for PySpiceBackend")
+        self._setup_logging()
+    
+    def _setup_logging(self):
+        """Setup PySpice logging."""
+        try:
+            logger = Logging.setup_logging()
+        except:
+            pass  # Logging setup might fail, but simulation can still work
+    
+    def run(self, netlist: str, analyses: list[str], **kwargs):
+        """
+        Run simulation analyses using PySpice.
+        
+        Args:
+            netlist: Complete SPICE netlist string
+            analyses: List of analysis types
+            **kwargs: Additional simulation parameters like temperature, etc.
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
+        # Parse the netlist using PySpice's SpiceParser
+        # This properly parses SPICE netlists and creates a circuit that can access node voltages
+        try:
+            import tempfile
+            import os
+            from PySpice.Spice.Parser import SpiceParser
+            
+            # Create a temporary file with the netlist
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.cir', delete=False) as f:
+                f.write(netlist)
+                netlist_path = f.name
+            
+            try:
+                # Use SpiceParser instead of direct Circuit file loading
+                parser = SpiceParser(path=str(netlist_path))
+                pyspice_circuit = parser.build_circuit()
+            finally:
+                # Clean up the temporary file
+                if os.path.exists(netlist_path):
+                    os.unlink(netlist_path)
+            
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse SPICE netlist: {e}")
+        
+        # Get simulation parameters
+        temperature = kwargs.get('temperature', 25)
+        
+        # Create simulator
+        simulator = pyspice_circuit.simulator(
+            temperature=temperature, 
+            nominal_temperature=temperature
+        )
+        
+        # Run requested analyses
+        analysis_result = None
+        analysis_type = "Unknown"
+        
+        try:
+            for analysis in analyses:
+                if analysis == "op":
+                    analysis_result = simulator.operating_point()
+                    analysis_type = "DC Operating Point"
+                    
+                elif analysis == "dc":
+                    # DC sweep requires additional parameters
+                    source_name = kwargs.get('source_name')
+                    start = kwargs.get('start')
+                    stop = kwargs.get('stop')
+                    step = kwargs.get('step')
+                    
+                    if not all([source_name, start is not None, stop is not None, step is not None]):
+                        raise ValueError("DC sweep requires source_name, start, stop, and step parameters")
+                    
+                    sweep_kwargs = {source_name: slice(start, stop, step)}
+                    analysis_result = simulator.dc(**sweep_kwargs)
+                    analysis_type = "DC Sweep"
+                    
+                elif analysis == "ac":
+                    # AC analysis parameters
+                    start_freq = kwargs.get('start_freq', 1)
+                    stop_freq = kwargs.get('stop_freq', 1e6)
+                    points_per_decade = kwargs.get('points_per_decade', 10)
+                    
+                    analysis_result = simulator.ac(
+                        start_frequency=start_freq@u_Hz,
+                        stop_frequency=stop_freq@u_Hz,
+                        number_of_points=points_per_decade,
+                        variation='dec'
+                    )
+                    analysis_type = "AC Analysis"
+                    
+                elif analysis == "transient":
+                    # Transient analysis parameters
+                    step_time = kwargs.get('step_time')
+                    end_time = kwargs.get('end_time')
+                    start_time = kwargs.get('start_time', 0)
+                    
+                    if step_time is None or end_time is None:
+                        raise ValueError("Transient analysis requires step_time and end_time parameters")
+                    
+                    # Check if initial conditions are present in the circuit
+                    circuit = kwargs.get('circuit')
+                    use_initial_condition = (circuit is not None and 
+                                           hasattr(circuit, '_initial_conditions') and 
+                                           len(circuit._initial_conditions) > 0)
+                    
+                    analysis_result = simulator.transient(
+                        step_time=step_time@u_s,
+                        end_time=end_time@u_s,
+                        start_time=start_time@u_s,
+                        use_initial_condition=use_initial_condition
+                    )
+                    analysis_type = "Transient Analysis"
+                    
+                else:
+                    raise ValueError(f"Unsupported analysis type: {analysis}")
+                    
+        except Exception as e:
+            raise RuntimeError(f"Simulation failed: {e}")
+        
+        # We need a reference to the original circuit for node mapping
+        # This is a bit of a hack for backward compatibility
+        circuit = kwargs.get('circuit')
+        if circuit is None:
+            raise ValueError("Circuit reference is required for result extraction")
+        
+        return SimulatedCircuit(circuit, analysis_type, analysis_result)
+
+
+class SpicelibBackend(SimulatorBackend):
+    """
+    Simulation backend using spicelib with NGspice.
+    
+    This backend generates SPICE netlists and runs them through NGspice
+    using the spicelib library, which provides clean access to simulation results.
+    """
+    
+    def run(self, netlist: str, analyses: list[str], **kwargs):
+        """
+        Run simulation analyses using spicelib with NGspice.
+        
+        Args:
+            netlist: Complete SPICE netlist string
+            analyses: List of analysis types (currently supports 'transient')
+            **kwargs: Additional simulation parameters like step_time, end_time, etc.
+                     keep_temp_files: Boolean to keep temporary files for debugging (default: False)
+            
+        Returns:
+            SimulatedCircuit: Simulation results
+        """
+        try:
+            from spicelib import SimRunner, RawRead
+            from spicelib.simulators.ngspice_simulator import NGspiceSimulator
+            import tempfile
+            import os
+            
+            # Add analysis commands to netlist based on requested analyses
+            modified_netlist = self._add_analysis_commands(netlist, analyses, **kwargs)
+            
+            # Create temporary netlist file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.net', delete=False) as f:
+                f.write(modified_netlist)
+                netlist_file = f.name
+            
+            # Variable to track output files for cleanup
+            result = None
+            raw_file = None
+            
+            try:
+                # Create spicelib runner with consistent output folder
+                import os
+                # Use absolute path to ensure consistent temp directory regardless of working directory
+                output_folder = os.path.join(os.getcwd(), 'temp_spice_sim')
+                # If we're in a subdirectory (like tests/), go up to project root
+                if os.path.basename(os.getcwd()) == 'tests':
+                    output_folder = os.path.join(os.path.dirname(os.getcwd()), 'temp_spice_sim')
+                
+                runner = SimRunner(simulator=NGspiceSimulator, output_folder=output_folder)
+                
+                # Run simulation
+                result = runner.run_now(netlist_file)
+                
+                if not result or not result[0]:
+                    raise RuntimeError("Simulation failed: no results returned")
+                
+                # Read simulation results
+                raw_file = result[0]
+                raw_data = RawRead(raw_file)
+                
+                # Get available traces
+                trace_names = raw_data.get_trace_names()
+                
+                # Extract time vector (common to all analyses)
+                time_trace = None
+                if 'time' in trace_names:
+                    time_trace = raw_data.get_trace('time')
+                
+                # Create SimulatedCircuit result
+                # Map analysis types to expected format
+                analysis_type_map = {
+                    'transient': 'Transient Analysis',
+                    'ac': 'AC Analysis', 
+                    'dc': 'DC Sweep',
+                    'op': 'DC Operating Point'
+                }
+                analysis_type = analysis_type_map.get(analyses[0], 'Transient Analysis') if analyses else 'Transient Analysis'
+                
+                return SimulatedCircuit(
+                    circuit=kwargs.get('circuit', None),  # Pass circuit for node name resolution
+                    analysis_type=analysis_type,
+                    time=time_trace.data if time_trace else None,
+                    raw_data=raw_data,  # Store raw data for node voltage extraction
+                    trace_names=trace_names
+                )
+                
+            finally:
+                # Clean up temporary files (unless user wants to keep them for debugging)
+                keep_temp_files = kwargs.get('keep_temp_files', False)
+                debug_cleanup = kwargs.get('debug_cleanup', False)
+                
+                if not keep_temp_files:
+                    files_to_clean = [netlist_file]
+                    
+                    # Add output files from spicelib simulation
+                    if result and result[0]:
+                        raw_file_path = str(result[0])
+                        files_to_clean.append(raw_file_path)  # Convert Path to string
+                        
+                        # Also clean up the corresponding .log file
+                        log_file = raw_file_path.replace('.raw', '.log')
+                        if os.path.exists(log_file):
+                            files_to_clean.append(log_file)
+                            
+                        # Also clean up the corresponding .net file in the output directory
+                        net_file = raw_file_path.replace('.raw', '.net')
+                        if os.path.exists(net_file):
+                            files_to_clean.append(net_file)
+                    
+                    if debug_cleanup:
+                        print(f"🧹 Cleanup: Found {len(files_to_clean)} files to clean:")
+                        for f in files_to_clean:
+                            print(f"  - {f} (exists: {os.path.exists(f)})")
+                    
+                    # Clean up all temporary files
+                    cleaned_count = 0
+                    for file_path in files_to_clean:
+                        if os.path.exists(file_path):
+                            try:
+                                os.unlink(file_path)
+                                cleaned_count += 1
+                                if debug_cleanup:
+                                    print(f"  ✅ Cleaned: {file_path}")
+                            except OSError as e:
+                                if debug_cleanup:
+                                    print(f"  ❌ Failed to clean {file_path}: {e}")
+                                pass
+                    
+                    if debug_cleanup:
+                        print(f"🧹 Cleanup completed: {cleaned_count}/{len(files_to_clean)} files removed")
+                    
+        except ImportError:
+            raise RuntimeError("spicelib not installed. Run: pip install spicelib")
+        except Exception as e:
+            raise RuntimeError(f"Simulation failed: {e}")
+    
+    def _add_analysis_commands(self, netlist: str, analyses: list[str], **kwargs) -> str:
+        """
+        Add analysis commands to the SPICE netlist.
+        
+        Args:
+            netlist: Base SPICE netlist
+            analyses: List of requested analyses
+            **kwargs: Analysis parameters
+            
+        Returns:
+            Modified netlist with analysis commands
+        """
+        # Remove existing .end and add analysis commands
+        lines = netlist.rstrip().rstrip('.end').strip().split('\n')
+        
+        for analysis in analyses:
+            if analysis == 'transient':
+                step_time = kwargs.get('step_time', 1e-6)
+                end_time = kwargs.get('end_time', 1e-3)
+                lines.append(f'.tran {step_time} {end_time} UIC')
+            elif analysis == 'ac':
+                start_freq = kwargs.get('start_freq', 1)
+                end_freq = kwargs.get('end_freq', 1e6)
+                points_per_decade = kwargs.get('points_per_decade', 10)
+                lines.append(f'.ac dec {points_per_decade} {start_freq} {end_freq}')
+            elif analysis == 'dc':
+                # DC sweep analysis
+                source = kwargs.get('source_name', kwargs.get('source', 'V1'))
+                start = kwargs.get('start', 0)
+                stop = kwargs.get('stop', 5)
+                step = kwargs.get('step', 0.1)
+                lines.append(f'.dc {source} {start} {stop} {step}')
+            elif analysis == 'op':
+                lines.append('.op')
+        
+        lines.append('.end')
+        return '\n'.join(lines)
+    
+    def get_node_voltage(self, result, node_name: str):
+        """
+        Extract node voltage from spicelib simulation results.
+        
+        Args:
+            result: SimulatedCircuit from spicelib simulation
+            node_name: Name of the node (e.g., 'N1', 'N2')
+            
+        Returns:
+            numpy array of voltage values or single voltage value
+        """
+        if not hasattr(result, 'raw_data') or not result.raw_data:
+            return 0.0
+        
+        # Try different node name formats
+        possible_names = [
+            f'v({node_name.lower()})',  # v(n1)
+            f'V({node_name.upper()})',  # V(N1) 
+            f'v({node_name})',          # v(N1)
+            node_name.lower(),          # n1
+            node_name.upper()           # N1
+        ]
+        
+        for name in possible_names:
+            if name in result.trace_names:
+                trace = result.raw_data.get_trace(name)
+                return trace.data
+        
+        # If no trace found, return 0.0 (fallback)
+        return 0.0
 
 
 class SimulatedCircuit:
@@ -24,7 +396,7 @@ class SimulatedCircuit:
     calculated for that component.
     """
     
-    def __init__(self, circuit, analysis_type, pyspice_results=None):
+    def __init__(self, circuit=None, analysis_type=None, pyspice_results=None, **spicelib_kwargs):
         self.circuit = circuit
         self.analysis_type = analysis_type
         self.pyspice_results = pyspice_results
@@ -32,6 +404,16 @@ class SimulatedCircuit:
         # Store the raw simulation results
         self.nodes = {}
         self.branches = {}
+        
+        # Support spicelib-style initialization
+        if 'time' in spicelib_kwargs:
+            self.time = spicelib_kwargs['time']
+        if 'raw_data' in spicelib_kwargs:
+            self.raw_data = spicelib_kwargs['raw_data']
+        if 'trace_names' in spicelib_kwargs:
+            self.trace_names = spicelib_kwargs['trace_names']
+            # Parse spicelib results to populate nodes dictionary
+            self._parse_spicelib_results()
         
         if pyspice_results is not None:
             self._parse_results(pyspice_results)
@@ -45,6 +427,34 @@ class SimulatedCircuit:
         if hasattr(results, 'branches'):
             for branch_name, branch_value in results.branches.items():
                 self.branches[str(branch_name)] = branch_value
+    
+    def _parse_spicelib_results(self):
+        """Parse spicelib results and populate nodes dictionary."""
+        if not hasattr(self, 'raw_data') or not self.raw_data or not hasattr(self, 'trace_names'):
+            return
+        
+        # Extract node voltages from spicelib raw data
+        for trace_name in self.trace_names:
+            # Look for voltage traces (node voltages)
+            if trace_name.startswith('v(') and trace_name.endswith(')'):
+                # Extract node name from v(node_name) format
+                node_name = trace_name[2:-1]  # Remove 'v(' and ')'
+                try:
+                    trace = self.raw_data.get_trace(trace_name)
+                    if trace and hasattr(trace, 'data'):
+                        self.nodes[node_name] = trace.data
+                except Exception:
+                    # If we can't get the trace, skip it
+                    continue
+            elif trace_name.startswith('V(') and trace_name.endswith(')'):
+                # Handle uppercase version V(node_name)
+                node_name = trace_name[2:-1]  # Remove 'V(' and ')'
+                try:
+                    trace = self.raw_data.get_trace(trace_name)
+                    if trace and hasattr(trace, 'data'):
+                        self.nodes[node_name] = trace.data
+                except Exception:
+                    continue
     
     def get_component_results(self, component):
         """
@@ -64,10 +474,10 @@ class SimulatedCircuit:
     
     def _get_node_voltage_value(self, node_name):
         """
-        Get the voltage value for a node name, handling case sensitivity and ground.
+        Get the voltage value for a node name, handling both PySpice and spicelib formats.
         
         Args:
-            node_name: The SPICE node name
+            node_name: The SPICE node name (e.g., 'N1', 'N2')
             
         Returns:
             float or array: The voltage value(s) at the node
@@ -76,6 +486,23 @@ class SimulatedCircuit:
         if node_name == 'gnd':
             return 0.0
         
+        # For spicelib backend, try to get trace directly
+        if hasattr(self, 'raw_data') and self.raw_data and hasattr(self, 'trace_names'):
+            # Try different node name formats for spicelib
+            possible_names = [
+                f'v({node_name.lower()})',  # v(n1), v(n2)
+                f'V({node_name.upper()})',  # V(N1), V(N2)
+                f'v({node_name})',          # v(N1), v(N2)
+                node_name.lower(),          # n1, n2
+                node_name.upper()           # N1, N2
+            ]
+            
+            for name in possible_names:
+                if name in self.trace_names:
+                    trace = self.raw_data.get_trace(name)
+                    return trace.data
+        
+        # Fall back to PySpice method for PySpice backend
         # First try exact match
         if node_name in self.nodes:
             node_value = self.nodes[node_name]
@@ -196,8 +623,44 @@ class SimulatedCircuit:
         Returns:
             Voltage value at the terminal
         """
-        node_name = self.circuit.get_spice_node_name(terminal)
-        return self._get_node_voltage_value(node_name)
+        # Handle spicelib backend case (circuit is None, use raw_data directly)
+        if hasattr(self, 'raw_data') and self.raw_data and self.circuit is None:
+            # For spicelib, we need to figure out the node name differently
+            # For now, try common node naming patterns
+            possible_names = []
+            
+            # If terminal has a string representation, try that
+            if hasattr(terminal, '__str__'):
+                term_str = str(terminal)
+                if 'N1' in term_str or 'N2' in term_str or 'N3' in term_str:
+                    # Extract node number from terminal string
+                    import re
+                    match = re.search(r'N(\d+)', term_str)
+                    if match:
+                        node_num = match.group(1)
+                        possible_names.extend([f'v(n{node_num})', f'V(N{node_num})', f'n{node_num}', f'N{node_num}'])
+            
+            # Try different node name formats
+            for name in possible_names:
+                if name in self.trace_names:
+                    trace = self.raw_data.get_trace(name)
+                    return trace.data
+            
+            # Fallback: try to match by index or pattern
+            for trace_name in self.trace_names:
+                if 'v(' in trace_name.lower() and ('n1' in trace_name.lower() or 'n2' in trace_name.lower()):
+                    trace = self.raw_data.get_trace(trace_name)
+                    return trace.data
+            
+            return 0.0
+        
+        # Handle PySpice backend case (circuit is available)
+        elif self.circuit is not None:
+            node_name = self.circuit.get_spice_node_name(terminal)
+            return self._get_node_voltage_value(node_name)
+        
+        else:
+            return 0.0
     
     def list_components(self):
         """List all components in the circuit."""
@@ -229,230 +692,59 @@ class SimulatedCircuit:
 
 
 class CircuitSimulator:
-    """PySpice-based simulator for Zest circuits."""
+    """
+    Legacy simulator wrapper for backward compatibility.
+    
+    This class is deprecated. Use the new backend-based simulation methods
+    on CircuitRoot instead: circuit.simulate_operating_point(), etc.
+    """
     
     def __init__(self, circuit):
-        if not PYSPICE_AVAILABLE:
-            raise ImportError("PySpice is required for simulation. Install with: pip install PySpice")
-        
         self.circuit = circuit
-        self._setup_logging()
-    
-    def _setup_logging(self):
-        """Setup PySpice logging."""
-        try:
-            logger = Logging.setup_logging()
-        except:
-            pass  # Logging setup might fail, but simulation can still work
-    
-    def _create_pyspice_circuit(self, add_current_probes=False):
-        """Convert Zest circuit to PySpice circuit."""
-        # Ensure component names are assigned first
-        self.circuit._assign_component_names()
-        for component in self.circuit.components:
-            component.name = self.circuit.get_component_name(component)
         
-        # Create PySpice circuit
-        pyspice_circuit = PySpiceCircuit(self.circuit.name)
-        
-        # Add .INCLUDE statements for external model files
-        from .components import SubCircuit
-        all_includes = set(self.circuit.includes)
-        circuits_to_scan = [self.circuit]
-        scanned_definitions = {self.circuit}
+        # Use the new spicelib backend internally
+        self._backend = SpicelibBackend()
+    
 
-        while circuits_to_scan:
-            current_circuit = circuits_to_scan.pop()
-            for component in current_circuit.components:
-                if isinstance(component, SubCircuit):
-                    definition = component.definition
-                    if definition not in scanned_definitions:
-                        all_includes.update(definition.includes)
-                        scanned_definitions.add(definition)
-                        circuits_to_scan.append(definition)
-
-        if all_includes:
-            for include_path in sorted(list(all_includes)):
-                pyspice_circuit.raw_spice += f'.INCLUDE "{include_path}"\n'
-        
-        # Add external models/subcircuits to raw SPICE (legacy support)
-        if self.circuit._include_models:
-            for model_text in sorted(self.circuit._include_models):
-                pyspice_circuit.raw_spice += f"{model_text}\n"
-        
-        # Add subcircuit definitions
-        from .components import SubCircuit
-        unique_definitions = {
-            comp.definition for comp in self.circuit.components if isinstance(comp, SubCircuit)
-        }
-        
-        # Filter out external-only subcircuits (defined in .INCLUDE files)
-        internal_definitions = {
-            definition for definition in unique_definitions
-            if not getattr(definition, '_is_external_only', False)
-        }
-        
-        if internal_definitions:
-            for definition in sorted(list(internal_definitions), key=lambda c: c.name):
-                subckt_spice = definition._compile_as_subcircuit()
-                pyspice_circuit.raw_spice += f"{subckt_spice}\n"
-        
-        # Add components from our circuit
-        for component in self.circuit.components:
-            self._add_component_to_pyspice(pyspice_circuit, component, add_current_probes)
-        
-        # Add initial conditions using raw SPICE directives
-        if self.circuit._initial_conditions:
-            # Group initial conditions by node
-            node_ics = {}
-            for terminal, voltage in self.circuit._initial_conditions.items():
-                node_name = self.circuit.get_spice_node_name(terminal)
-                if node_name != "gnd":  # Skip ground (always 0V)
-                    node_ics[node_name] = voltage
-            
-            # Add .IC directive for each node using raw_spice
-            for node_name, voltage in node_ics.items():
-                pyspice_circuit.raw_spice += f".IC V({node_name})={voltage}\n"
-        
-        return pyspice_circuit
-    
-    def _add_component_to_pyspice(self, pyspice_circuit, component, add_current_probes=False):
-        """Add a Zest component to PySpice circuit."""
-        from .components import VoltageSource, Resistor, Capacitor, Inductor, SubCircuit
-        
-        # For SubCircuit and other components that compile to SPICE,
-        # we handle them through the raw SPICE interface
-        if isinstance(component, SubCircuit) or hasattr(component, 'to_spice'):
-            # Check if this is a basic component we can handle directly
-            if not isinstance(component, (VoltageSource, Resistor, Capacitor, Inductor)):
-                # This is a component that needs to be handled as raw SPICE
-                spice_line = component.to_spice(self.circuit)
-                pyspice_circuit.raw_spice += f"{spice_line}\n"
-                return
-        
-        if isinstance(component, VoltageSource):
-            # Get SPICE node names for the terminals
-            pos_node = self.circuit.get_spice_node_name(component.pos)
-            neg_node = self.circuit.get_spice_node_name(component.neg)
-            
-            # Convert 'gnd' to PySpice ground
-            if pos_node == 'gnd':
-                pos_node = pyspice_circuit.gnd
-            if neg_node == 'gnd':
-                neg_node = pyspice_circuit.gnd
-            
-            # PySpice adds a "V" prefix to voltage source names, so we need to remove 
-            # the "V" from our component name to avoid "VV1" 
-            vs_name = component.name[1:] if component.name.startswith('V') else component.name
-            pyspice_circuit.V(vs_name, pos_node, neg_node, component.voltage@u_V)
-            
-        elif isinstance(component, Resistor):
-            # Get SPICE node names for the terminals
-            n1_node = self.circuit.get_spice_node_name(component.n1)
-            n2_node = self.circuit.get_spice_node_name(component.n2)
-            
-            # Convert 'gnd' to PySpice ground
-            if n1_node == 'gnd':
-                n1_node = pyspice_circuit.gnd
-            if n2_node == 'gnd':
-                n2_node = pyspice_circuit.gnd
-            
-            # PySpice adds an "R" prefix to resistor names
-            r_name = component.name[1:] if component.name.startswith('R') else component.name    
-            resistor = pyspice_circuit.R(r_name, n1_node, n2_node, component.resistance@u_Ω)
-            
-            # Add current probe if requested
-            if add_current_probes:
-                resistor.minus.add_current_probe(pyspice_circuit)
-            
-        elif isinstance(component, Capacitor):
-            # Get SPICE node names for the terminals
-            pos_node = self.circuit.get_spice_node_name(component.pos)
-            neg_node = self.circuit.get_spice_node_name(component.neg)
-            
-            # Convert 'gnd' to PySpice ground
-            if pos_node == 'gnd':
-                pos_node = pyspice_circuit.gnd
-            if neg_node == 'gnd':
-                neg_node = pyspice_circuit.gnd
-            
-            # PySpice adds a "C" prefix to capacitor names
-            c_name = component.name[1:] if component.name.startswith('C') else component.name
-            pyspice_circuit.C(c_name, pos_node, neg_node, component.capacitance@u_F)
-            
-        elif isinstance(component, Inductor):
-            # Get SPICE node names for the terminals
-            n1_node = self.circuit.get_spice_node_name(component.n1)
-            n2_node = self.circuit.get_spice_node_name(component.n2)
-            
-            # Convert 'gnd' to PySpice ground
-            if n1_node == 'gnd':
-                n1_node = pyspice_circuit.gnd
-            if n2_node == 'gnd':
-                n2_node = pyspice_circuit.gnd
-            
-            # PySpice adds an "L" prefix to inductor names
-            l_name = component.name[1:] if component.name.startswith('L') else component.name
-            pyspice_circuit.L(l_name, n1_node, n2_node, component.inductance@u_H)
-            
-        else:
-            raise ValueError(f"Unsupported component type: {type(component)}")
     
     def operating_point(self, temperature=25, add_current_probes=False):
-        """Run DC operating point analysis."""
-        pyspice_circuit = self._create_pyspice_circuit(add_current_probes=add_current_probes)
-        simulator = pyspice_circuit.simulator(temperature=temperature, nominal_temperature=temperature)
-        
-        try:
-            analysis = simulator.operating_point()
-            return SimulatedCircuit(self.circuit, "DC Operating Point", analysis)
-        except Exception as e:
-            raise RuntimeError(f"Simulation failed: {e}")
+        """Run DC operating point analysis (legacy method)."""
+        return self.circuit.simulate_operating_point(
+            backend=self._backend, 
+            temperature=temperature, 
+            add_current_probes=add_current_probes
+        )
     
     def dc_sweep(self, source_name, start, stop, step, temperature=25):
-        """Run DC sweep analysis."""
-        pyspice_circuit = self._create_pyspice_circuit()
-        simulator = pyspice_circuit.simulator(temperature=temperature, nominal_temperature=temperature)
-        
-        try:
-            # PySpice newer API uses keyword arguments with slice notation
-            # PySpice expects the exact component name for sweeps
-            sweep_kwargs = {source_name: slice(start, stop, step)}
-            analysis = simulator.dc(**sweep_kwargs)
-            return SimulatedCircuit(self.circuit, "DC Sweep", analysis)
-        except Exception as e:
-            raise RuntimeError(f"DC sweep simulation failed: {e}")
+        """Run DC sweep analysis (legacy method)."""
+        return self.circuit.simulate_dc_sweep(
+            source_name=source_name,
+            start=start,
+            stop=stop,
+            step=step,
+            backend=self._backend,
+            temperature=temperature
+        )
     
     def ac_analysis(self, start_freq=1, stop_freq=1e6, points_per_decade=10, temperature=25):
-        """Run AC analysis."""
-        pyspice_circuit = self._create_pyspice_circuit()
-        simulator = pyspice_circuit.simulator(temperature=temperature, nominal_temperature=temperature)
-        
-        try:
-            analysis = simulator.ac(start_frequency=start_freq@u_Hz, 
-                                  stop_frequency=stop_freq@u_Hz, 
-                                  number_of_points=points_per_decade,  
-                                  variation='dec')
-            return SimulatedCircuit(self.circuit, "AC Analysis", analysis)
-        except Exception as e:
-            raise RuntimeError(f"AC analysis failed: {e}")
+        """Run AC analysis (legacy method)."""
+        return self.circuit.simulate_ac(
+            start_freq=start_freq,
+            stop_freq=stop_freq,
+            points_per_decade=points_per_decade,
+            backend=self._backend,
+            temperature=temperature
+        )
     
     def transient_analysis(self, step_time, end_time, start_time=0, temperature=25):
-        """Run transient analysis."""
-        pyspice_circuit = self._create_pyspice_circuit()
-        simulator = pyspice_circuit.simulator(temperature=temperature, nominal_temperature=temperature)
-        
-        try:
-            # Use initial conditions if they exist
-            use_initial_condition = len(self.circuit._initial_conditions) > 0
-            
-            analysis = simulator.transient(step_time=step_time@u_s, 
-                                         end_time=end_time@u_s,
-                                         start_time=start_time@u_s,
-                                         use_initial_condition=use_initial_condition)
-            return SimulatedCircuit(self.circuit, "Transient Analysis", analysis)
-        except Exception as e:
-            raise RuntimeError(f"Transient analysis failed: {e}")
+        """Run transient analysis (legacy method)."""
+        return self.circuit.simulate_transient(
+            step_time=step_time,
+            end_time=end_time,
+            start_time=start_time,
+            backend=self._backend,
+            temperature=temperature
+        )
 
 
 def check_simulation_requirements():

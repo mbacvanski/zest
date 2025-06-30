@@ -15,12 +15,12 @@ XR2_custom vout gnd CUSTOM_RESISTOR
 .ENDS VOLTAGE_DIVIDER_CUSTOM
 
 * ===== Main Circuit Components ===== *
-V1 V1_pos gnd DC 5.0
-XX_RC_Filter V1_pos XX_RC_Filter_vout gnd RC_FILTER_STAGE_CUSTOM
-XX_Voltage_Divider XX_RC_Filter_vout XX_Voltage_Divider_vout gnd VOLTAGE_DIVIDER_CUSTOM
+V1 N1 gnd DC 5.0
+XX_RC_Filter N1 N2 gnd RC_FILTER_STAGE_CUSTOM
+XX_Voltage_Divider N2 N3 gnd VOLTAGE_DIVIDER_CUSTOM
 
 * Initial Conditions
-.IC V(XX_RC_Filter_vout)=0.0
-.IC V(XX_Voltage_Divider_vout)=0.0
+.IC V(N2)=0.0
+.IC V(N3)=0.0
 
 .end

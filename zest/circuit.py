@@ -46,17 +46,9 @@ class NodeMapper:
             if t in self._connected(k):
                 return name
 
-        # 3. Generate a more descriptive name based on terminal's string representation
-        # Use the terminal's string form but make it SPICE-compatible
-        terminal_str = str(t)
-        if hasattr(t, 'component') and t.component is not None:
-            # For component terminals, use the terminal's string form
-            # This will be like "V1.pos" or "R1.n1", convert dots to underscores
-            spice_name = terminal_str.replace('.', '_')
-        else:
-            # For standalone terminals, fallback to generic naming
-            spice_name = f"N{self._counter}"
-            self._counter += 1
+        # 3. Generate generic node name
+        spice_name = f"N{self._counter}"
+        self._counter += 1
         
         self._cache[t] = spice_name
         return spice_name
@@ -391,6 +383,9 @@ class CircuitRoot(NetlistBlock):
         # For backward compatibility, also update component.name attributes
         for component, assigned_name in name_table.items():
             component.name = assigned_name
+        
+        # Cache the NodeMapper used for compilation to ensure consistency with result extraction
+        self._node_mapper = mapper
 
         # 3. Build the netlist string.
         lines = [f"* Circuit: {self.name}", ""]
@@ -459,29 +454,80 @@ class CircuitRoot(NetlistBlock):
         return "\n".join(lines)
     
     def get_simulator(self):
-        """Get a simulator for this circuit."""
+        """Get a simulator for this circuit (legacy compatibility)."""
         from .simulation import CircuitSimulator
         return CircuitSimulator(self)
     
-    def simulate_operating_point(self, temperature=25, add_current_probes=False):
+    def simulate_operating_point(self, backend=None, temperature=25, add_current_probes=False, keep_temp_files=False, debug_cleanup=False):
         """Run DC operating point analysis."""
-        simulator = self.get_simulator()
-        return simulator.operating_point(temperature=temperature, add_current_probes=add_current_probes)
+        if backend is None:
+            from .simulation import SpicelibBackend
+            backend = SpicelibBackend()
+        
+        netlist = self.compile_to_spice()
+        return backend.run(
+            netlist, 
+            analyses=["op"], 
+            temperature=temperature,
+            circuit=self,
+            keep_temp_files=keep_temp_files,
+            debug_cleanup=debug_cleanup
+        )
     
-    def simulate_dc_sweep(self, source_name, start, stop, step, temperature=25):
+    def simulate_dc_sweep(self, source_name, start, stop, step, backend=None, temperature=25, keep_temp_files=False):
         """Run DC sweep analysis."""
-        simulator = self.get_simulator()
-        return simulator.dc_sweep(source_name, start, stop, step, temperature=temperature)
+        if backend is None:
+            from .simulation import SpicelibBackend
+            backend = SpicelibBackend()
+        
+        netlist = self.compile_to_spice()
+        return backend.run(
+            netlist,
+            analyses=["dc"],
+            temperature=temperature,
+            circuit=self,
+            source_name=source_name,
+            start=start,
+            stop=stop,
+            step=step,
+            keep_temp_files=keep_temp_files
+        )
     
-    def simulate_ac(self, start_freq=1, stop_freq=1e6, points_per_decade=10, temperature=25):
+    def simulate_ac(self, start_freq=1, stop_freq=1e6, points_per_decade=10, backend=None, temperature=25, keep_temp_files=False):
         """Run AC analysis."""
-        simulator = self.get_simulator()
-        return simulator.ac_analysis(start_freq, stop_freq, points_per_decade, temperature)
+        if backend is None:
+            from .simulation import SpicelibBackend
+            backend = SpicelibBackend()
+        
+        netlist = self.compile_to_spice()
+        return backend.run(
+            netlist,
+            analyses=["ac"],
+            temperature=temperature,
+            circuit=self,
+            start_freq=start_freq,
+            stop_freq=stop_freq,
+            points_per_decade=points_per_decade,
+            keep_temp_files=keep_temp_files
+        )
     
-    def simulate_transient(self, step_time, end_time, start_time=0, temperature=25):
+    def simulate_transient(self, step_time, end_time, start_time=0, backend=None, temperature=25, keep_temp_files=False):
         """Run transient analysis."""
-        simulator = self.get_simulator()
-        return simulator.transient_analysis(step_time, end_time, start_time, temperature)
+        if backend is None:
+            from .simulation import SpicelibBackend
+            backend = SpicelibBackend()
+        
+        netlist = self.compile_to_spice()
+        return backend.run(
+            netlist,
+            analyses=["transient"],
+            temperature=temperature,
+            circuit=self,
+            step_time=step_time,
+            end_time=end_time,
+            start_time=start_time,
+            keep_temp_files=keep_temp_files
+        )
     
     def __repr__(self):
         return f"Circuit('{self.name}', {len(self.components)} components, {len(self.wires)} wires)"

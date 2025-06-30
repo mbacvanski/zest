@@ -1,0 +1,10 @@
+* Simple BJT test
+.INCLUDE "/Users/marc/Code/zest/tests/models/simple_npn.lib"
+
+V1 vcc 0 DC 5.0
+R1 vcc c 1k
+R2 vcc b 100k
+XQ1 c b 0 SIMPLE_NPN
+
+.OP
+.end

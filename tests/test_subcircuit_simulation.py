@@ -122,17 +122,13 @@ class TestSubcircuitSimulation(WaveformTestMixin, unittest.TestCase):
         step_time = 1e-6
         
         print(f"\n--- Running Transient Simulation (0 to {end_time*1000:.1f}ms) ---")
-        try:
-            results = main_circuit.simulate_transient(step_time=step_time, end_time=end_time)
-            self.assertIsNotNone(results, "Simulation should complete successfully")
-        except Exception as e:
-            # Skip the complex simulation part if it fails due to SPICE model issues
-            print(f"   ⚠️  Complex simulation skipped due to: {e}")
-            print("   ✅ But subcircuit structure validation passed!")
-            return  # Early return to skip the rest of the simulation analysis
+        results = main_circuit.simulate_transient(step_time=step_time, end_time=end_time)
+        self.assertIsNotNone(results, "Simulation should complete successfully")
 
         # --- 7. Extract and Verify Results ---
-        times = results._extract_value(results.pyspice_results.time)
+        times = results.get_time_vector()
+        if times is None and hasattr(results, 'time') and results.time is not None:
+            times = results.time
         q1_collector_v = results._extract_value(results.get_node_voltage(q1.collector))
         q2_collector_v = results._extract_value(results.get_node_voltage(q2.collector))
         
@@ -183,6 +179,21 @@ class TestSubcircuitSimulation(WaveformTestMixin, unittest.TestCase):
                                  msg=f"Frequency should be reasonably close to theoretical value")
         else:
             print("Note: Limited oscillation cycles detected - may be starting transient or very slow oscillation")
+
+        # Generate plots for visual inspection
+        print(f"\n📊 Generating astable multivibrator waveform plots...")
+        
+        # Convert time to milliseconds for better readability
+        times_ms = times * 1000
+        
+        # Create plot using the WaveformTestMixin functionality
+        self.plot_and_save_transient(
+            times_ms,
+            [q1_collector_v, q2_collector_v],
+            value_names=('Q1 Collector', 'Q2 Collector'),
+            title="Astable Multivibrator Oscillation",
+            filename="astable_multivibrator_demo.png"
+        )
 
         # Verification C: Golden Waveform Comparison
         # Note: First run will create the golden file

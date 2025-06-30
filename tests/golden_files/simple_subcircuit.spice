@@ -7,7 +7,7 @@ R2 vout gnd 10000
 .ENDS VOLTAGE_DIVIDER
 
 * ===== Main Circuit Components ===== *
-V1 V1_pos V1_neg DC 12.0
-XU1 V1_pos XU1_vout V1_neg VOLTAGE_DIVIDER
+V1 N1 N2 DC 12.0
+XU1 N1 N3 N2 VOLTAGE_DIVIDER
 
 .end

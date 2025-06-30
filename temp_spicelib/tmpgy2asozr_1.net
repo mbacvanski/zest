@@ -1,0 +1,11 @@
+* Circuit: Test RC Circuit
+
+V1 N1 gnd DC 5.0
+R1 N1 N2 1000
+C1 N2 gnd 1e-06
+
+* Initial Conditions
+.IC V(N2)=0.0
+
+.tran 1e-6 5e-3
+.end

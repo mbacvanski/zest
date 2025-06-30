@@ -208,6 +208,13 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         print(f"Initial voltage: {cap_voltage_data[0]:.3f}V")
         print(f"Final voltage: {cap_voltage_data[-1]:.3f}V")
         
+        # Plot and save results
+        self.plot_and_save_transient(
+            times, [cap_voltage_data], ("V(capacitor)",),
+            title="RC Discharging Transient (τ=1ms)",
+            filename="rc_discharging_transient.png"
+        )
+
         # Verify exponential decay: V(t) = V0 * exp(-t/τ)
         initial_voltage = cap_voltage_data[0]
         final_voltage = cap_voltage_data[-1]
@@ -225,12 +232,6 @@ class TestTransientAnalysis(WaveformTestMixin, unittest.TestCase):
         self.assertAlmostEqual(voltage_1tau, expected_1tau, delta=0.5, 
                              msg="Voltage at 1τ should be ~37% of initial")
         
-        # Plot and save results
-        self.plot_and_save_transient(
-            times, [cap_voltage_data], ("V(capacitor)",),
-            title="RC Discharging Transient (τ=1ms)",
-            filename="rc_discharging_transient.png"
-        )
         
         # Validate against golden file
         self.assert_waveform_matches_golden(

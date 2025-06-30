@@ -10,12 +10,12 @@ CC_internal vout gnd 1e-06
 .ENDS RC_FILTER_STAGE_CUSTOM
 
 * ===== Main Circuit Components ===== *
-V1 V1_pos gnd DC 1.0
-XX_Stage1_Custom V1_pos XX_Stage1_Custom_vout gnd RC_FILTER_STAGE_CUSTOM
-XX_Stage2_Custom XX_Stage1_Custom_vout XX_Stage2_Custom_vout gnd RC_FILTER_STAGE_CUSTOM
+V1 N1 gnd DC 1.0
+XX_Stage1_Custom N1 N2 gnd RC_FILTER_STAGE_CUSTOM
+XX_Stage2_Custom N2 N3 gnd RC_FILTER_STAGE_CUSTOM
 
 * Initial Conditions
-.IC V(XX_Stage1_Custom_vout)=0.0
-.IC V(XX_Stage2_Custom_vout)=0.0
+.IC V(N2)=0.0
+.IC V(N3)=0.0
 
 .end

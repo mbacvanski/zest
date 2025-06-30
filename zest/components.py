@@ -309,6 +309,9 @@ class SubCircuit(Component):
             subckt_def._include_models = definition._include_models.copy()
             subckt_def.includes = definition.includes[:]
             subckt_def._initial_conditions = definition._initial_conditions.copy()
+            # Preserve external-only flag if it exists
+            if hasattr(definition, '_is_external_only'):
+                subckt_def._is_external_only = definition._is_external_only
             self.definition = subckt_def
         else:
             raise TypeError("Subcircuit definition must be a 'Circuit' or 'SubCircuitDef' object.")

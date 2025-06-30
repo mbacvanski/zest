@@ -1,6 +1,6 @@
 * Circuit: Simple Circuit
 
-V1 V1_pos gnd DC 5.0
-R1 V1_pos gnd 1000
+V1 N1 gnd DC 5.0
+R1 N1 gnd 1000
 
 .end

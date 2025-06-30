@@ -72,7 +72,9 @@ class TestCascadedFilterSimulation(WaveformTestMixin, GoldenTestMixin, unittest.
         self.assertIsNotNone(results)
 
         # 5. Extract and verify results.
-        times = results._extract_value(results.pyspice_results.time)
+        times = results.get_time_vector()
+        if times is None and hasattr(results, 'time') and results.time is not None:
+            times = results.time
         v_out_stage1 = results.get_node_voltage(stage1.vout)
         v_out_stage2 = results.get_node_voltage(stage2.vout)
 
@@ -268,7 +270,9 @@ class TestCascadedFilterSimulation(WaveformTestMixin, GoldenTestMixin, unittest.
         results = main_circuit.simulate_transient(step_time=1e-5, end_time=100e-3)
         self.assertIsNotNone(results)
 
-        times = results._extract_value(results.pyspice_results.time)
+        times = results.get_time_vector()
+        if times is None and hasattr(results, 'time') and results.time is not None:
+            times = results.time
         v_out_stage1 = results.get_node_voltage(stage1.vout)
         v_out_stage2 = results.get_node_voltage(stage2.vout)
 
@@ -373,7 +377,9 @@ class TestCascadedFilterSimulation(WaveformTestMixin, GoldenTestMixin, unittest.
         results = main_circuit.simulate_transient(step_time=1e-5, end_time=100e-3)
         self.assertIsNotNone(results)
 
-        times = results._extract_value(results.pyspice_results.time)
+        times = results.get_time_vector()
+        if times is None and hasattr(results, 'time') and results.time is not None:
+            times = results.time
         v_out_stage1 = results.get_node_voltage(stage1.vout)
         v_out_stage2 = results.get_node_voltage(stage2.vout)
 
@@ -429,7 +435,9 @@ class TestCascadedFilterSimulation(WaveformTestMixin, GoldenTestMixin, unittest.
         baseline_circuit.set_initial_condition(stage2_baseline.vout, 0.0)
         
         baseline_results = baseline_circuit.simulate_transient(step_time=1e-5, end_time=100e-3)
-        baseline_times = baseline_results._extract_value(baseline_results.pyspice_results.time)
+        baseline_times = baseline_results.get_time_vector()
+        if baseline_times is None and hasattr(baseline_results, 'time') and baseline_results.time is not None:
+            baseline_times = baseline_results.time
         baseline_v1 = baseline_results.get_node_voltage(stage1_baseline.vout)
         baseline_v2 = baseline_results.get_node_voltage(stage2_baseline.vout)
         
@@ -520,7 +528,9 @@ class TestCascadedFilterSimulation(WaveformTestMixin, GoldenTestMixin, unittest.
         results = main_circuit.simulate_transient(step_time=1e-5, end_time=50e-3)
         self.assertIsNotNone(results)
 
-        times = results._extract_value(results.pyspice_results.time)
+        times = results.get_time_vector()
+        if times is None and hasattr(results, 'time') and results.time is not None:
+            times = results.time
         v_rc_out = results.get_node_voltage(rc_stage.vout)
         v_divider_out = results.get_node_voltage(divider_stage.vout)
 

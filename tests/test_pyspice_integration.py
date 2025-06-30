@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zest import Circuit, VoltageSource, Resistor, Capacitor, Inductor
 from zest.simulation import check_simulation_requirements, CircuitSimulator
-from golden_test_framework import GoldenTestMixin, GoldenTestFramework
+from .golden_test_framework import GoldenTestMixin, GoldenTestFramework
 
 
 class TestPySpiceIntegration(GoldenTestMixin, unittest.TestCase):
