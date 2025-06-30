@@ -143,6 +143,18 @@ class SpicelibBackend(SimulatorBackend):
                         if os.path.exists(net_file):
                             files_to_clean.append(net_file)
                     
+                    # Look for any .fail files from failed simulations (common pattern: tmpXXXXXX_1.fail)
+                    base_name = os.path.splitext(os.path.basename(netlist_file))[0]  # Get tmp part without extension
+                    output_folder = os.path.join(os.getcwd(), 'temp_spice_sim')
+                    if os.path.basename(os.getcwd()) == 'tests':
+                        output_folder = os.path.join(os.path.dirname(os.getcwd()), 'temp_spice_sim')
+                    
+                    # Check for .fail files with similar naming pattern
+                    import glob
+                    fail_pattern = os.path.join(output_folder, f"{base_name}*.fail")
+                    fail_files = glob.glob(fail_pattern)
+                    files_to_clean.extend(fail_files)
+                    
                     if debug_cleanup:
                         print(f"🧹 Cleanup: Found {len(files_to_clean)} files to clean:")
                         for f in files_to_clean:

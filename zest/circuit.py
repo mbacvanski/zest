@@ -156,11 +156,39 @@ class NetlistBlock(ABC):
         """
         Include external SPICE model definitions in this circuit.
         
+        Usage patterns:
+        - For subcircuits: Include only the internal model content (no .SUBCKT wrapper needed)
+        - For main circuits: Include complete .SUBCKT definitions for reusable models
+        
         Args:
-            model_text: Raw SPICE text containing .SUBCKT/.MODEL definitions
+            model_text: Raw SPICE text containing model definitions
+                       For subcircuits: Just the internal content (e.g., "EGAIN out 0 VALUE=...")
+                       For main circuits: Complete .SUBCKT blocks when defining reusable models
+        
+        Examples:
+            # Subcircuit - just internal content:
+            subcircuit.include_model("EGAIN out 0 VALUE = {LIMIT(1e6*(V(plus)-V(minus)), -1e12, 1e12)}")
+            
+            # Main circuit - complete .SUBCKT for reusable model:
+            main_circuit.include_model(".subckt OPAMP plus minus out\\nEGAIN out 0 VALUE=...\\n.ends")
         """
         if isinstance(model_text, str) and model_text.strip():
-            self._include_models.add(model_text.strip())
+            clean_text = model_text.strip()
+            
+            # Smart validation: warn about .SUBCKT usage in subcircuit contexts
+            has_subckt_wrapper = '.subckt' in clean_text.lower() and '.ends' in clean_text.lower()
+            is_subcircuit_context = hasattr(self, 'pins') and self.pins  # Has pins = likely subcircuit
+            
+            if has_subckt_wrapper and is_subcircuit_context:
+                import warnings
+                warnings.warn(
+                    "Including .SUBCKT/.ENDS wrappers in a subcircuit context may cause double-wrapping. "
+                    "Consider using just the internal model content for subcircuit definitions.",
+                    UserWarning,
+                    stacklevel=2
+                )
+            
+            self._include_models.add(clean_text)
     
     def add_include(self, path: str):
         """
@@ -282,40 +310,89 @@ class NetlistBlock(ABC):
             for terminal_name, terminal in component.get_terminals():
                 yield terminal
     
-    def _compile_as_subcircuit(self):
-        """Legacy method for backwards compatibility with old SubCircuit system."""
-        # Implement the subcircuit compilation logic for CircuitRoot
+    def _prepare_compilation_context(self, pin_aliases=None):
+        """
+        Prepare common compilation context used by both subcircuit and main circuit compilation.
+        
+        Args:
+            pin_aliases: Optional pin aliases for NodeMapper
+            
+        Returns:
+            tuple: (mapper, name_table) for compilation
+        """
+        # Assign component names without side-effects
+        name_table = self._assign_component_names_pure()
+        
+        # Create mapper
+        mapper = NodeMapper(
+            connectivity_fn=self._find_connected_terminals,
+            pin_aliases=pin_aliases or {},
+        )
+        
+        return mapper, name_table
+    
+    def _compile_components_to_lines(self, mapper, name_table):
+        """
+        Compile all components to SPICE lines using forced naming.
+        
+        Args:
+            mapper: NodeMapper instance
+            name_table: Component name assignments
+            
+        Returns:
+            list: SPICE lines for all components
+        """
+        return [
+            comp.to_spice(mapper, forced_name=name_table[comp])
+            for comp in self.components
+        ]
+    
+    def _format_include_models(self):
+        """
+        Format include_models content as lines.
+        
+        Returns:
+            list: Formatted model lines (empty if no models)
+        """
+        if not self._include_models:
+            return []
+        
+        lines = []
+        for model_text in sorted(self._include_models):
+            # Add the model text directly (without .subckt wrapper if present)
+            model_lines = model_text.strip().split('\n')
+            lines.extend(model_lines)
+        return lines
+
+    def compile_as_subckt(self, mapper=None):
+        """
+        Compile this netlist block into a .SUBCKT block.
+        Pure function: return a `.SUBCKT / .ENDS` string.
+        Must NOT mutate self or child components.
+        
+        Args:
+            mapper: NodeMapper instance for pin naming overrides (unused for now)
+            
+        Returns:
+            str: .SUBCKT definition
+        """
         # A. deterministic pin order
         pin_order = list(self.pins.keys())
 
-        # B. assign component names without side-effects
-        name_table = self._assign_component_names_pure()
+        # B. prepare compilation context
+        pin_aliases = {term: pin for pin, term in self.pins.items()}
+        mapper, name_table = self._prepare_compilation_context(pin_aliases)
+
+        # C. emit body
+        body_lines = []
         
-        # C. Temporarily set component names for NodeMapper to work correctly
-        original_names = {}
-        for comp, assigned_name in name_table.items():
-            original_names[comp] = comp.name
-            comp.name = assigned_name
+        # Add include_model content first (within the subcircuit)
+        body_lines.extend(self._format_include_models())
+        
+        # Add component instances
+        body_lines.extend(self._compile_components_to_lines(mapper, name_table))
 
-        try:
-            # D. create mapper with pin aliases
-            mapper = NodeMapper(
-                connectivity_fn=self._find_connected_terminals,
-                pin_aliases={term: pin for pin, term in self.pins.items()},
-            )
-
-            # E. emit body
-            body_lines = []
-            for comp in self.components:
-                body_lines.append(
-                    comp.to_spice(mapper, forced_name=name_table[comp])
-                )
-        finally:
-            # F. restore original component names (pure function requirement)
-            for comp, original_name in original_names.items():
-                comp.name = original_name
-
-        # G. wrap
+        # D. wrap with .SUBCKT/.ENDS
         header = f".SUBCKT {self.name} " + " ".join(pin_order)
         footer = f".ENDS {self.name}"
         return "\n".join([header, *body_lines, footer])
@@ -377,8 +454,7 @@ class CircuitRoot(NetlistBlock):
                         circuits_to_scan.append(definition) # Scan for nested subcircuits
 
         # 2. Create mapper and assign component names for the entire circuit.
-        mapper = NodeMapper(self._find_connected_terminals)
-        name_table = self._assign_component_names_pure()
+        mapper, name_table = self._prepare_compilation_context()
         
         # For backward compatibility, also update component.name attributes
         for component, assigned_name in name_table.items():
@@ -397,12 +473,13 @@ class CircuitRoot(NetlistBlock):
                 lines.append(f'.INCLUDE "{include_path}"')
             lines.append("")
 
-        # Add external model includes (legacy support)
+        # Add external model definitions from main circuit only
+        # Subcircuits include their own _include_models within their .SUBCKT/.ENDS blocks
+        # This prevents model duplication and ensures proper scoping
         if self._include_models:
             lines.append("* ===== External Model Definitions ===== *")
-            for model_text in sorted(self._include_models):
-                lines.append(model_text)
-                lines.append("")
+            lines.extend(self._format_include_models())
+            lines.append("")
 
         # 5. Use the recursively collected subcircuit definitions.
         # Remove the main circuit itself and filter out external-only subcircuits
@@ -416,18 +493,13 @@ class CircuitRoot(NetlistBlock):
             # Sort for consistent output in golden file testing
             for name in sorted(internal_definitions.keys()):
                 definition = internal_definitions[name]
-                if hasattr(definition, 'compile_as_subckt'):
-                    # New SubCircuitDef
-                    lines.append(definition.compile_as_subckt())
-                else:
-                    # Legacy Circuit with _compile_as_subcircuit method
-                    lines.append(definition._compile_as_subcircuit())
+                # All NetlistBlock objects now have compile_as_subckt()
+                lines.append(definition.compile_as_subckt())
                 lines.append("")
             lines.append("* ===== Main Circuit Components ===== *")
 
         # 6. Write the main circuit component and instance lines.
-        for component in self.components:
-            lines.append(component.to_spice(mapper, forced_name=name_table[component]))
+        lines.extend(self._compile_components_to_lines(mapper, name_table))
 
         # 7. Add initial conditions if any.
         if self._initial_conditions:
@@ -557,53 +629,6 @@ class SubCircuitDef(NetlistBlock):
             str: .SUBCKT definition
         """
         return self.compile_as_subckt(mapper)
-    
-    def compile_as_subckt(self, mapper=None):
-        """
-        Compile this subcircuit into a .SUBCKT block.
-        Pure function: return a `.SUBCKT / .ENDS` string.
-        Must NOT mutate self or child components.
-        
-        Args:
-            mapper: NodeMapper instance for pin naming overrides (unused for now)
-            
-        Returns:
-            str: .SUBCKT definition
-        """
-        # A. deterministic pin order
-        pin_order = list(self.pins.keys())
-
-        # B. assign component names without side-effects
-        name_table = self._assign_component_names_pure()
-        
-        # C. Temporarily set component names for NodeMapper to work correctly
-        original_names = {}
-        for comp, assigned_name in name_table.items():
-            original_names[comp] = comp.name
-            comp.name = assigned_name
-
-        try:
-            # D. create mapper with pin aliases
-            mapper = NodeMapper(
-                connectivity_fn=self._find_connected_terminals,
-                pin_aliases={term: pin for pin, term in self.pins.items()},
-            )
-
-            # E. emit body
-            body_lines = []
-            for comp in self.components:
-                body_lines.append(
-                    comp.to_spice(mapper, forced_name=name_table[comp])
-                )
-        finally:
-            # F. restore original component names (pure function requirement)
-            for comp, original_name in original_names.items():
-                comp.name = original_name
-
-        # G. wrap
-        header = f".SUBCKT {self.name} " + " ".join(pin_order)
-        footer = f".ENDS {self.name}"
-        return "\n".join([header, *body_lines, footer])
 
 
 class SubCircuitInst:

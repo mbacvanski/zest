@@ -58,7 +58,7 @@ class TestSubcircuitSimulation(WaveformTestMixin, unittest.TestCase):
         # --- 1. Get Subcircuit Definition ---
         rc_def = create_rc_block_definition()
         print("\n--- RC Block Subcircuit Definition ---")
-        print(rc_def._compile_as_subcircuit())
+        print(rc_def.compile_as_subckt())
 
         # --- 2. Build the Main Circuit ---
         main_circuit = Circuit("AstableMultivibrator")
@@ -210,7 +210,7 @@ class TestSubcircuitSimulation(WaveformTestMixin, unittest.TestCase):
         self.assertEqual(len(rc_def.components), 2, "Should have 2 components: R and C")
         
         # Verify SPICE compilation
-        spice_def = rc_def._compile_as_subcircuit()
+        spice_def = rc_def.compile_as_subckt()
         self.assertIn(".SUBCKT RC_BLOCK", spice_def)
         self.assertIn(".ENDS RC_BLOCK", spice_def)
         self.assertIn("R1", spice_def)
