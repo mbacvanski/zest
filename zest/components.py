@@ -316,6 +316,145 @@ class PiecewiseLinearVoltageSource(Component):
         return f"PiecewiseLinearVoltageSource({self.name}, {len(self.time_voltage_pairs)} points)"
 
 
+class PulsedVoltageSource(Component):
+    """Pulsed voltage source component using SPICE PULSE function."""
+    
+    def __init__(self, v1=0.0, v2=5.0, td=0.0, tr=1e-9, tf=1e-9, pw=1e-6, per=2e-6, name=None):
+        """
+        Initialize a pulsed voltage source.
+        
+        Args:
+            v1: Initial voltage level (V). Default: 0.0
+            v2: Pulsed voltage level (V). Default: 5.0 
+            td: Delay time before first pulse (s). Default: 0.0
+            tr: Rise time from v1 to v2 (s). Default: 1e-9
+            tf: Fall time from v2 to v1 (s). Default: 1e-9
+            pw: Pulse width at v2 level (s). Default: 1e-6
+            per: Period of the pulse train (s). Default: 2e-6
+            name: Optional component name
+            
+        Examples:
+            # 5V pulse train with 1us pulse width, 2us period
+            pulse_vs = PulsedVoltageSource(v1=0, v2=5, pw=1e-6, per=2e-6)
+            
+            # Clock signal with fast rise/fall times
+            clock = PulsedVoltageSource(v1=0, v2=3.3, tr=100e-12, tf=100e-12, 
+                                      pw=500e-9, per=1e-6)
+            
+            # Delayed pulse starting at 1ms
+            delayed_pulse = PulsedVoltageSource(v1=0, v2=5, td=1e-3, pw=100e-6, per=200e-6)
+        """
+        # Validate parameters
+        if not isinstance(v1, (int, float)) or not isinstance(v2, (int, float)):
+            raise ValueError("v1 and v2 must be numbers")
+        
+        if td < 0 or tr <= 0 or tf <= 0 or pw <= 0 or per <= 0:
+            raise ValueError("All timing parameters (td, tr, tf, pw, per) must be positive (td can be zero)")
+        
+        if per <= pw:
+            raise ValueError("Period (per) must be greater than pulse width (pw)")
+        
+        if tr + tf > pw:
+            raise ValueError("Rise time + fall time cannot exceed pulse width")
+        
+        self.v1 = v1
+        self.v2 = v2
+        self.td = td
+        self.tr = tr
+        self.tf = tf
+        self.pw = pw
+        self.per = per
+        
+        super().__init__(name)
+        
+        # Create terminals - these are the nodes in the graph
+        self.pos = Terminal(self, "pos")
+        self.neg = Terminal(self, "neg")
+        
+        # Aliases for convenience
+        self.positive = self.pos
+        self.negative = self.neg
+    
+    def get_component_type_prefix(self):
+        return "V"
+    
+    def get_terminals(self):
+        return [('pos', self.pos), ('neg', self.neg)]
+    
+    def to_spice(self, mapper, *, forced_name=None):
+        """Convert to SPICE PULSE format using NodeMapper."""
+        pos_node = mapper.name_for(self.pos)
+        neg_node = mapper.name_for(self.neg)
+        
+        # Build PULSE string: PULSE(V1 V2 TD TR TF PW PER)
+        pulse_string = f"PULSE({self.v1} {self.v2} {self.td} {self.tr} {self.tf} {self.pw} {self.per})"
+        
+        return f"{forced_name or self.name} {pos_node} {neg_node} {pulse_string}"
+    
+    def _add_derived_results(self, results, simulated_circuit):
+        """Add pulsed voltage source specific results: current and voltage across."""
+        # Use the new deterministic current method
+        try:
+            current_value = simulated_circuit.get_component_current(self)
+            results['current'] = current_value
+        except ValueError:
+            # Current not available in simulation results
+            pass
+        
+        # Calculate voltage across the source
+        terminal_voltages = results['terminal_voltages']
+        v_pos_raw = terminal_voltages.get('pos', 0.0)
+        v_neg_raw = terminal_voltages.get('neg', 0.0)
+        
+        # Extract scalar values from simulation data (handles both scalars and arrays)
+        v_pos = simulated_circuit._extract_value(v_pos_raw)
+        v_neg = simulated_circuit._extract_value(v_neg_raw)
+        
+        results['voltage_across'] = v_pos - v_neg
+    
+    def get_voltage_at_time(self, t):
+        """
+        Calculate the theoretical voltage at a specific time for the pulse waveform.
+        
+        Args:
+            t: Time value
+            
+        Returns:
+            float: Voltage at time t
+        """
+        if t < 0:
+            raise ValueError("Time must be non-negative")
+        
+        # Before delay: v1
+        if t < self.td:
+            return self.v1
+        
+        # Calculate time within the current period
+        t_in_period = (t - self.td) % self.per
+        
+        # Rising edge
+        if t_in_period < self.tr:
+            # Linear rise from v1 to v2
+            return self.v1 + (self.v2 - self.v1) * (t_in_period / self.tr)
+        
+        # High level
+        elif t_in_period < (self.pw - self.tf):
+            return self.v2
+        
+        # Falling edge
+        elif t_in_period < self.pw:
+            # Linear fall from v2 to v1
+            fall_progress = (t_in_period - (self.pw - self.tf)) / self.tf
+            return self.v2 - (self.v2 - self.v1) * fall_progress
+        
+        # Low level (remainder of period)
+        else:
+            return self.v1
+    
+    def __repr__(self):
+        return f"PulsedVoltageSource({self.name}, {self.v1}V->{self.v2}V, {self.per*1e6:.1f}us period)"
+
+
 class Resistor(Component):
     """Resistor component."""
     

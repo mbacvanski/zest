@@ -6,7 +6,7 @@ and terminal-based connections for clean, readable circuit descriptions.
 """
 
 from .circuit import Circuit, CircuitRoot, SubCircuitDef, SubCircuitInst, NetlistBlock, NodeMapper
-from .components import Component, Terminal, GroundTerminal, VoltageSource, PiecewiseLinearVoltageSource, Resistor, Capacitor, Inductor, SubCircuit, CurrentSource, ExternalSubCircuit, gnd
+from .components import Component, Terminal, GroundTerminal, VoltageSource, PiecewiseLinearVoltageSource, PulsedVoltageSource, Resistor, Capacitor, Inductor, SubCircuit, CurrentSource, ExternalSubCircuit, gnd
 from .simulation import CircuitSimulator, SimulatedCircuit, check_simulation_requirements, SimulatorBackend, SpicelibBackend
 
 __version__ = "0.1.0"
@@ -92,7 +92,7 @@ __all__ = [
     # Core circuit classes
     "Circuit", "CircuitRoot", "SubCircuitDef", "SubCircuitInst", "NetlistBlock", "NodeMapper",
     # Component classes
-    "Component", "Terminal", "GroundTerminal", "VoltageSource", "PiecewiseLinearVoltageSource", "Resistor", "Capacitor", "Inductor", "SubCircuit", "CurrentSource", "ExternalSubCircuit",
+    "Component", "Terminal", "GroundTerminal", "VoltageSource", "PiecewiseLinearVoltageSource", "PulsedVoltageSource", "Resistor", "Capacitor", "Inductor", "SubCircuit", "CurrentSource", "ExternalSubCircuit",
     # Ground reference
     "gnd",
     # Simulation classes
