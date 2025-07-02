@@ -119,11 +119,24 @@ class SpicelibBackend(SimulatorBackend):
                 result = runner.run_now(netlist_file)
                 
                 if not result or not result[0]:
-                    raise RuntimeError("Simulation failed: no results returned")
+                    # Simulation failed - collect diagnostic information
+                    error_details = self._collect_failure_diagnostics(
+                        netlist_file, result, output_folder, 
+                        base_name=os.path.splitext(os.path.basename(netlist_file))[0]
+                    )
+                    raise RuntimeError(f"Simulation failed: no results returned\n\n{error_details}")
                 
                 # Read simulation results
                 raw_file = result[0]
-                raw_data = RawRead(raw_file)
+                try:
+                    raw_data = RawRead(raw_file)
+                except Exception as e:
+                    # Failed to read simulation results - collect diagnostic information
+                    error_details = self._collect_failure_diagnostics(
+                        netlist_file, result, output_folder, 
+                        base_name=os.path.splitext(os.path.basename(netlist_file))[0]
+                    )
+                    raise RuntimeError(f"Simulation failed: unable to read results: {e}\n\n{error_details}")
                 
                 # Get available traces
                 trace_names = raw_data.get_trace_names()
@@ -158,6 +171,9 @@ class SpicelibBackend(SimulatorBackend):
                 if cleanup_mode != 'keep':
                     files_to_clean = [netlist_file]
                     
+                    # Get base name for pattern matching
+                    base_name = os.path.splitext(os.path.basename(netlist_file))[0]
+                    
                     # Add output files from spicelib simulation
                     if result and result[0]:
                         raw_file_path = str(result[0])
@@ -172,14 +188,19 @@ class SpicelibBackend(SimulatorBackend):
                         net_file = raw_file_path.replace('.raw', '.net')
                         if os.path.exists(net_file):
                             files_to_clean.append(net_file)
+                    else:
+                        # If spicelib didn't return expected results, look for files by pattern
+                        # This handles cases where simulation failed but files were still created
+                        import glob
+                        raw_pattern = os.path.join(output_folder, f"{base_name}*.raw")
+                        log_pattern = os.path.join(output_folder, f"{base_name}*.log")
+                        net_pattern = os.path.join(output_folder, f"{base_name}*.net")
+                        
+                        files_to_clean.extend(glob.glob(raw_pattern))
+                        files_to_clean.extend(glob.glob(log_pattern))
+                        files_to_clean.extend(glob.glob(net_pattern))
                     
                     # Look for any .fail files from failed simulations (common pattern: tmpXXXXXX_1.fail)
-                    base_name = os.path.splitext(os.path.basename(netlist_file))[0]  # Get tmp part without extension
-                    output_folder = os.path.join(os.getcwd(), 'temp_spice_sim')
-                    if os.path.basename(os.getcwd()) == 'tests':
-                        output_folder = os.path.join(os.path.dirname(os.getcwd()), 'temp_spice_sim')
-                    
-                    # Check for .fail files with similar naming pattern
                     import glob
                     fail_pattern = os.path.join(output_folder, f"{base_name}*.fail")
                     fail_files = glob.glob(fail_pattern)
@@ -210,8 +231,23 @@ class SpicelibBackend(SimulatorBackend):
                     
         except ImportError:
             raise RuntimeError("spicelib not installed. Run: pip install spicelib")
+        except RuntimeError as e:
+            # Re-raise RuntimeError (including our enhanced failure diagnostics)
+            raise e
         except Exception as e:
-            raise RuntimeError(f"Simulation failed: {e}")
+            # Handle other exceptions from spicelib - collect diagnostics if possible
+            try:
+                if 'netlist_file' in locals() and 'output_folder' in locals():
+                    base_name = os.path.splitext(os.path.basename(netlist_file))[0]
+                    error_details = self._collect_failure_diagnostics(
+                        netlist_file, None, output_folder, base_name
+                    )
+                    raise RuntimeError(f"Simulation failed with exception: {e}\n\n{error_details}")
+                else:
+                    raise RuntimeError(f"Simulation failed with exception: {e}")
+            except Exception:
+                # If diagnostic collection fails, just raise the original error
+                raise RuntimeError(f"Simulation failed with exception: {e}")
     
     def _add_analysis_commands(self, netlist: str, analyses: list[str], **kwargs) -> str:
         """
@@ -250,6 +286,141 @@ class SpicelibBackend(SimulatorBackend):
         
         lines.append('.end')
         return '\n'.join(lines)
+    
+    def _collect_failure_diagnostics(self, netlist_file, result, output_folder, base_name):
+        """
+        Collect diagnostic information when a simulation fails.
+        
+        Args:
+            netlist_file: Path to the netlist file that was used
+            result: The result from spicelib (may be None or empty)
+            output_folder: The output folder where simulation files are stored
+            base_name: Base name for looking up related files
+            
+        Returns:
+            str: Formatted diagnostic information including file contents
+        """
+        import os
+        import glob
+        
+        diagnostics = []
+        diagnostics.append("=== SIMULATION FAILURE DIAGNOSTICS ===")
+        
+        # 1. Read netlist file content
+        if os.path.exists(netlist_file):
+            try:
+                with open(netlist_file, 'r') as f:
+                    netlist_content = f.read()
+                diagnostics.append(f"\n--- NETLIST FILE ({netlist_file}) ---")
+                diagnostics.append(netlist_content)
+            except Exception as e:
+                diagnostics.append(f"\n--- NETLIST FILE ({netlist_file}) - READ ERROR ---")
+                diagnostics.append(f"Could not read netlist: {e}")
+        else:
+            diagnostics.append(f"\n--- NETLIST FILE ---")
+            diagnostics.append(f"Netlist file not found: {netlist_file}")
+        
+        # 2. Look for and read log files (common patterns: base_name.log, base_name_1.log, etc.)
+        log_patterns = [
+            os.path.join(output_folder, f"{base_name}.log"),
+            os.path.join(output_folder, f"{base_name}_1.log"),
+            os.path.join(output_folder, f"{base_name}*.log")
+        ]
+        
+        log_files_found = []
+        for pattern in log_patterns:
+            if '*' in pattern:
+                log_files_found.extend(glob.glob(pattern))
+            elif os.path.exists(pattern):
+                log_files_found.append(pattern)
+        
+        for log_file in log_files_found:
+            try:
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+                diagnostics.append(f"\n--- LOG FILE ({log_file}) ---")
+                diagnostics.append(log_content)
+            except Exception as e:
+                diagnostics.append(f"\n--- LOG FILE ({log_file}) - READ ERROR ---")
+                diagnostics.append(f"Could not read log file: {e}")
+        
+        if not log_files_found:
+            diagnostics.append(f"\n--- LOG FILES ---")
+            diagnostics.append("No log files found")
+        
+        # 3. Look for and read .fail files
+        fail_patterns = [
+            os.path.join(output_folder, f"{base_name}.fail"),
+            os.path.join(output_folder, f"{base_name}_1.fail"),
+            os.path.join(output_folder, f"{base_name}*.fail")
+        ]
+        
+        fail_files_found = []
+        for pattern in fail_patterns:
+            if '*' in pattern:
+                fail_files_found.extend(glob.glob(pattern))
+            elif os.path.exists(pattern):
+                fail_files_found.append(pattern)
+        
+        for fail_file in fail_files_found:
+            try:
+                with open(fail_file, 'r') as f:
+                    fail_content = f.read()
+                diagnostics.append(f"\n--- FAIL FILE ({fail_file}) ---")
+                diagnostics.append(fail_content)
+            except Exception as e:
+                diagnostics.append(f"\n--- FAIL FILE ({fail_file}) - READ ERROR ---")
+                diagnostics.append(f"Could not read fail file: {e}")
+        
+        if not fail_files_found:
+            diagnostics.append(f"\n--- FAIL FILES ---")
+            diagnostics.append("No .fail files found")
+        
+        # 4. Look for and read raw files (though these are less useful for failed simulations)
+        raw_patterns = [
+            os.path.join(output_folder, f"{base_name}.raw"),
+            os.path.join(output_folder, f"{base_name}_1.raw"),
+            os.path.join(output_folder, f"{base_name}*.raw")
+        ]
+        
+        raw_files_found = []
+        for pattern in raw_patterns:
+            if '*' in pattern:
+                raw_files_found.extend(glob.glob(pattern))
+            elif os.path.exists(pattern):
+                raw_files_found.append(pattern)
+        
+        for raw_file in raw_files_found:
+            try:
+                # Raw files are binary, so just check if they exist and their size
+                size = os.path.getsize(raw_file)
+                diagnostics.append(f"\n--- RAW FILE ({raw_file}) ---")
+                diagnostics.append(f"Raw file exists, size: {size} bytes")
+                if size == 0:
+                    diagnostics.append("WARNING: Raw file is empty")
+            except Exception as e:
+                diagnostics.append(f"\n--- RAW FILE ({raw_file}) - READ ERROR ---")
+                diagnostics.append(f"Could not read raw file: {e}")
+        
+        if not raw_files_found:
+            diagnostics.append(f"\n--- RAW FILES ---")
+            diagnostics.append("No .raw files found")
+        
+        # 5. Include information about spicelib result
+        diagnostics.append(f"\n--- SPICELIB RESULT ---")
+        if result is None:
+            diagnostics.append("Result: None")
+        elif len(result) == 0:
+            diagnostics.append("Result: Empty list")
+        else:
+            diagnostics.append(f"Result: {result}")
+            diagnostics.append(f"Result type: {type(result)}")
+            if hasattr(result, '__len__'):
+                diagnostics.append(f"Result length: {len(result)}")
+        
+        diagnostics.append("\n=== END DIAGNOSTICS ===")
+        
+        return '\n'.join(diagnostics)
     
 
 

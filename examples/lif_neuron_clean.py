@@ -32,9 +32,9 @@ def create_voltage_controlled_switch_with_hysteresis_subcircuit(on_voltage=0.2, 
     switch_def.add_pin("NCP", pin_ncp)
     switch_def.add_pin("NCM", pin_ncm)
 
-    # Define and include the switch model
+    # Define and include the switch model with reasonable resistance values
     switch_model = (
-        f".model SW1 SW(Ron={1e-9} Roff={1e9} Vt={on_voltage} Vh={hysteresis_voltage})"
+        f".model SW1 SW(Ron={1.0} Roff={1e6} Vt={on_voltage} Vh={hysteresis_voltage})"
     )
     switch_def.include_model(switch_model)
 
@@ -45,7 +45,7 @@ def create_voltage_controlled_switch_with_hysteresis_subcircuit(on_voltage=0.2, 
     return switch_def
 
 
-def create_rc_with_switch_subcircuit(r=1e6, c=1e-6, switch_on_voltage=0.5, switch_hysteresis=0.4):
+def create_lif_circuit(r=1e6, c=1e-6, switch_on_voltage=0.5, switch_hysteresis=0.4):
     """
     Creates a subcircuit definition for an RC circuit with a voltage-controlled switch.
     This implements the core of a leaky integrate-and-fire neuron.
@@ -110,7 +110,7 @@ def test_lif_neuron_circuit(input_current=5e-6, membrane_r=1e6, membrane_c=1e-6,
         Simulation results object
     """
     # Create the LIF neuron circuit
-    rc_def = create_rc_with_switch_subcircuit(r=membrane_r, c=membrane_c)
+    rc_def = create_lif_circuit(r=membrane_r, c=membrane_c)
     rc = SubCircuitInst(rc_def)
     
     circuit = Circuit("LIF Neuron Circuit")

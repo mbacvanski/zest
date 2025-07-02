@@ -453,7 +453,7 @@ class CircuitRoot(NetlistBlock):
                         all_includes.update(definition.includes)
                         scanned_definitions[definition.name] = definition
                         circuits_to_scan.append(definition) # Scan for nested subcircuits
-
+        
         # 2. Create mapper and assign component names for the entire circuit.
         mapper, name_table = self._prepare_compilation_context()
         

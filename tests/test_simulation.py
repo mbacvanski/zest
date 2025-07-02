@@ -421,6 +421,211 @@ class TestBranchCurrentMethods(unittest.TestCase):
             pass
 
 
+class TestSimulationFailureHandling(unittest.TestCase):
+    """Test enhanced error handling when simulations fail."""
+    
+    def test_invalid_circuit_failure_diagnostics(self):
+        """Test that simulation failures include diagnostic information."""
+        backend = SpicelibBackend()
+        
+        # Create a netlist with undefined component models that will cause failure
+        malformed_netlist = """
+        * Circuit with undefined component model
+        V1 N1 gnd DC 5.0
+        Q1 N2 N1 gnd UNDEFINED_BJT_MODEL
+        .op
+        .end
+        """
+        
+        # Attempt simulation - this should fail and include diagnostics
+        with self.assertRaises(RuntimeError) as context:
+            backend.run(malformed_netlist, analyses=["op"], cleanup="keep")
+        
+        error_message = str(context.exception)
+        
+        # Verify error message contains diagnostic sections
+        self.assertIn("SIMULATION FAILURE DIAGNOSTICS", error_message)
+        self.assertIn("NETLIST FILE", error_message)
+        
+        # Verify the netlist content is included
+        self.assertIn("UNDEFINED_BJT_MODEL", error_message)
+        self.assertIn("V1", error_message)
+        
+        # Clean up any remaining files manually since we used cleanup="keep"
+        import os
+        import glob
+        temp_files = glob.glob("temp_spice_sim/*")
+        for f in temp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    
+    def test_malformed_netlist_failure_diagnostics(self):
+        """Test failure handling with intentionally malformed netlist."""
+        backend = SpicelibBackend()
+        
+        # Create a malformed netlist that should cause spicelib to fail
+        malformed_netlist = """
+        * Malformed Circuit
+        V1 N1 gnd DC 5.0
+        R1 N1 INVALID_NODE 1000
+        .op
+        .end
+        """
+        
+        # Attempt simulation - should fail with diagnostics
+        with self.assertRaises(RuntimeError) as context:
+            backend.run(malformed_netlist, analyses=["op"], cleanup="keep")
+        
+        error_message = str(context.exception)
+        
+        # Verify diagnostic sections are present
+        self.assertIn("SIMULATION FAILURE DIAGNOSTICS", error_message)
+        self.assertIn("NETLIST FILE", error_message)
+        
+        # Verify the malformed netlist is included in diagnostics
+        self.assertIn("INVALID_NODE", error_message)
+        self.assertIn("Malformed Circuit", error_message)
+        
+        # Clean up any remaining files manually since we used cleanup="keep"
+        import os
+        import glob
+        temp_files = glob.glob("temp_spice_sim/*")
+        for f in temp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    
+    def test_cleanup_after_failure_diagnostics(self):
+        """Test that files are cleaned up after collecting failure diagnostics."""
+        import os
+        import glob
+        
+        # Clear any existing temp files
+        temp_files = glob.glob("temp_spice_sim/*")
+        for f in temp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        
+        backend = SpicelibBackend()
+        
+        # Create a netlist that will cause failure
+        failing_netlist = """
+        * Circuit with undefined model
+        V1 N1 gnd DC 5.0
+        Q1 N2 N1 gnd UNDEFINED_MODEL
+        .op
+        .end
+        """
+        
+        # Run simulation with default cleanup (should clean up after failure)
+        with self.assertRaises(RuntimeError):
+            backend.run(failing_netlist, analyses=["op"], cleanup="silent")
+        
+        # Check that temp files were cleaned up
+        remaining_files = glob.glob("temp_spice_sim/*")
+        self.assertEqual(len(remaining_files), 0, 
+                        f"Temporary files not cleaned up: {remaining_files}")
+    
+    def test_verbose_cleanup_after_failure_diagnostics(self):
+        """Test verbose cleanup after failure diagnostics."""
+        import os
+        import glob
+        import io
+        import sys
+        
+        # Clear any existing temp files
+        temp_files = glob.glob("temp_spice_sim/*")
+        for f in temp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        
+        backend = SpicelibBackend()
+        
+        # Create a netlist that will cause failure
+        failing_netlist = """
+        * Circuit with undefined model
+        V1 N1 gnd DC 5.0
+        Q1 N2 N1 gnd UNDEFINED_MODEL
+        .op
+        .end
+        """
+        
+        # Capture stdout to check verbose cleanup output
+        captured_output = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured_output
+        
+        try:
+            # Run simulation with verbose cleanup
+            with self.assertRaises(RuntimeError):
+                backend.run(failing_netlist, analyses=["op"], cleanup="verbose")
+        finally:
+            sys.stdout = old_stdout
+        
+        # Check verbose output contains cleanup information
+        output = captured_output.getvalue()
+        if output:  # Only check if there was verbose output
+            self.assertIn("🧹 Cleanup", output)
+        
+        # Verify files were cleaned up
+        remaining_files = glob.glob("temp_spice_sim/*")
+        self.assertEqual(len(remaining_files), 0,
+                        f"Temporary files not cleaned up: {remaining_files}")
+    
+    def test_keep_files_for_debugging(self):
+        """Test that cleanup='keep' preserves files even after failure diagnostics."""
+        import os
+        import glob
+        
+        # Clear any existing temp files
+        temp_files = glob.glob("temp_spice_sim/*")
+        for f in temp_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        
+        backend = SpicelibBackend()
+        
+        # Create a netlist that will cause failure
+        failing_netlist = """
+        * Circuit with undefined model
+        V1 N1 gnd DC 5.0
+        Q1 N2 N1 gnd UNDEFINED_MODEL
+        .op
+        .end
+        """
+        
+        # Run simulation with cleanup='keep'
+        with self.assertRaises(RuntimeError):
+            backend.run(failing_netlist, analyses=["op"], cleanup="keep")
+        
+        # Check that temp files were NOT cleaned up
+        remaining_files = glob.glob("temp_spice_sim/*")
+        self.assertGreater(len(remaining_files), 0,
+                          "Files should be kept when cleanup='keep'")
+        
+        # Look for specific file types
+        netlist_files = glob.glob("temp_spice_sim/*.net")
+        log_files = glob.glob("temp_spice_sim/*.log")
+        
+        self.assertGreater(len(netlist_files), 0, "Netlist file should be kept")
+        
+        # Clean up manually for next test
+        for f in remaining_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
 class TestSpiceGenerationIntegration(GoldenTestMixin, unittest.TestCase):
     """Test SPICE generation integration with simulation."""
     
